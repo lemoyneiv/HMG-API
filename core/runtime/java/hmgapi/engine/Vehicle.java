@@ -36,8 +36,8 @@ public final class Vehicle {
         Map<String, Reading> m = new LinkedHashMap<String, Reading>();
         add(m, "gear.park", "0/1", 500, "gear in P");
         add(m, "parking_brake", "0/1", 1000, "electronic parking brake engaged");
-        add(m, "speed", "km/h", 250, "vehicle speed");
-        add(m, "moving", "0/1", 250, "the car is moving");
+        add(m, "speed", "km/h", 100, "vehicle speed");
+        add(m, "moving", "0/1", 100, "the car is moving");
         add(m, "driving.restricted", "0/1", 500, "the car's own driving restriction is on (what stock video apps follow)");
         add(m, "steering.angle", "degrees", 100, "steering wheel angle, left negative");
         add(m, "pedal.accel", "raw", 100, "accelerator pedal");
