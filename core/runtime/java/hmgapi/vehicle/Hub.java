@@ -77,18 +77,61 @@ public final class Hub {
         LocalServerSocket server = new LocalServerSocket(SOCKET);
         System.out.println("vehicle: listening on @" + SOCKET);
         while (true) {
-            LocalSocket s = server.accept();
+            LocalSocket s = null;
             try {
+                s = server.accept();
                 serve(s);
             } catch (Throwable t) {
                 System.out.println("vehicle: " + t);
+                if (s == null) try { Thread.sleep(100); } catch (InterruptedException ignored) {}
             } finally {
-                try {
-                    s.close();
-                } catch (Exception x) {
-                    // gone already
-                }
+                closeAccepted(s);
             }
+        }
+    }
+
+    private static java.lang.reflect.Method ioBridgeClose;
+    private static boolean ioBridgeChecked;
+
+    /**
+     * Closes an accepted LocalSocket on Android 4.4.2 KitKat, where LocalServerSocket.accept()
+     * leaves LocalSocketImpl.fdCreatedInternally == false (AOSP Issue 36917), causing s.close()
+     * to null impl.fd without closing the OS file descriptor (stalling hmgapid for EOF and leaking FDs).
+     */
+    static void closeAccepted(LocalSocket s) {
+        if (s == null) return;
+        java.io.FileDescriptor fd = null;
+        try { fd = s.getFileDescriptor(); } catch (Throwable ignored) {}
+        try { s.shutdownOutput(); } catch (Throwable ignored) {}
+        try { s.shutdownInput(); } catch (Throwable ignored) {}
+        try { s.close(); } catch (Throwable ignored) {}
+        closeLeakedFd(fd);
+    }
+
+    static void closeLeakedFd(java.io.FileDescriptor fd) {
+        if (fd == null || !fd.valid()) return;
+        try {
+            if (!ioBridgeChecked) {
+                ioBridgeChecked = true;
+                try {
+                    ioBridgeClose = Class.forName("libcore.io.IoBridge")
+                            .getMethod("closeAndSignalBlockedThreads", java.io.FileDescriptor.class);
+                } catch (Throwable ignored) {}
+            }
+            if (ioBridgeClose != null) {
+                ioBridgeClose.invoke(null, fd);
+            }
+        } catch (Throwable ignored) {}
+        if (fd.valid()) {
+            try {
+                java.lang.reflect.Field f = java.io.FileDescriptor.class.getDeclaredField("descriptor");
+                f.setAccessible(true);
+                int raw = f.getInt(fd);
+                if (raw >= 0) {
+                    f.setInt(fd, -1);
+                    android.os.ParcelFileDescriptor.adoptFd(raw).close();
+                }
+            } catch (Throwable ignored) {}
         }
     }
 
