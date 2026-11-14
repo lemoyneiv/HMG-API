@@ -9,6 +9,7 @@ cat > "$T/src/hmgapi/hook/ModDexCacheTest.java" <<'J'
 package hmgapi.hook;
 import java.io.*;
 import java.nio.file.*;
+import java.util.*;
 public final class ModDexCacheTest {
     static void check(boolean b, String s) { if (!b) throw new AssertionError(s); System.out.println("ok    " + s); }
     public static void main(String[] args) throws Exception {
@@ -31,8 +32,43 @@ public final class ModDexCacheTest {
         File blocked = new File(root, "blocked"); Files.write(blocked.toPath(), new byte[] {0});
         try { ModDexCache.directory(blocked, "mod"); throw new AssertionError("accepted file as parent"); }
         catch (IOException expected) { System.out.println("ok    cache creation failure is explicit"); }
+
+        File app = new File(root, "app-cleanup"); app.mkdirs();
+        Files.write(new File(app, "hooks.dex").toPath(), new byte[] {1});
+        File kept = ModDexCache.directory(app, "installed-mod");
+        File stale = ModDexCache.directory(app, "removed-mod");
+        Files.write(new File(kept, "hooks.dex").toPath(), new byte[] {2});
+        Files.write(new File(stale, "hooks.dex").toPath(), new byte[] {3});
+        File malformed = new File(app, ".bad"); malformed.mkdirs();
+        Set<String> installed = new HashSet<String>(); installed.add("installed-mod");
+        hmgapi.engine.DexCacheCleanup.reconcile(app, installed);
+        check(!new File(app, "hooks.dex").exists(), "app: obsolete shared hooks.dex removed");
+        check(kept.isDirectory(), "app: installed mod cache preserved");
+        check(!stale.exists(), "app: removed mod cache deleted");
+        check(malformed.isDirectory(), "app: malformed cache directory name is ignored");
+
+        File outside = new File(root, "outside"); outside.mkdirs();
+        Files.write(new File(outside, "keep").toPath(), new byte[] {4});
+        try {
+            Files.createSymbolicLink(new File(app, "unsafe-link").toPath(), outside.toPath());
+            hmgapi.engine.DexCacheCleanup.reconcile(app, Collections.<String>emptySet());
+            check(new File(outside, "keep").isFile(), "app: symlink cannot cause deletion outside cache root");
+        } catch (UnsupportedOperationException e) {
+            System.out.println("ok    symlink safety test unsupported on this host");
+        }
+
+        File linkedTarget = new File(root, "linked-target"); linkedTarget.mkdirs();
+        Files.write(new File(linkedTarget, "hooks.dex").toPath(), new byte[] {5});
+        try {
+            File linkedRoot = new File(root, "linked-root");
+            Files.createSymbolicLink(linkedRoot.toPath(), linkedTarget.toPath());
+            hmgapi.engine.DexCacheCleanup.reconcile(linkedRoot, Collections.<String>emptySet());
+            check(new File(linkedTarget, "hooks.dex").isFile(), "app: symlinked cache root is refused");
+        } catch (UnsupportedOperationException e) {
+            System.out.println("ok    root symlink safety test unsupported on this host");
+        }
     }
 }
 J
-javac --release 8 -Xlint:-options -d "$T/classes" core/runtime/java/hmgapi/hook/ModDexCache.java "$T/src/hmgapi/hook/ModDexCacheTest.java"
+javac --release 8 -Xlint:-options -d "$T/classes" core/runtime/java/hmgapi/engine/DexCacheCleanup.java core/runtime/java/hmgapi/hook/ModDexCache.java "$T/src/hmgapi/hook/ModDexCacheTest.java"
 java -cp "$T/classes" hmgapi.hook.ModDexCacheTest "$T/cache"

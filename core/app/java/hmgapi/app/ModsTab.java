@@ -117,7 +117,7 @@ final class ModsTab {
             void done(List<Mod> r, Exception e) {
                 list.removeAllViews();
                 if (e != null) {
-                    Ui.text(list, "  Can't reach hmgapid: " + e.getMessage(), 17, false, Ui.ERROR);
+                    Ui.text(list, "  " + Hmgapid.unreachable(e), 17, false, Ui.ERROR);
                     return;
                 }
                 mods = r;

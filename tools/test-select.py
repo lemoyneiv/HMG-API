@@ -39,8 +39,9 @@ RULES = [
     # the engine also gives the version the installers and the SDK are named by (Engine.java)
     (['core/runtime/java/hmgapi/engine/*', 'core/runtime/test/hmgapi/engine/*'], ENGINE + INSTALL + SDK),
     # hooks and the vehicle service: their own tests, and the SDK (mods compile against them)
-    (['core/runtime/java/hmgapi/hook/*', 'core/runtime/test/hmgapi/hook/*'], ['core/runtime/keys-test.sh', 'core/runtime/mod-dex-test.sh'] + SDK),
+    (['core/runtime/java/hmgapi/hook/*', 'core/runtime/test/hmgapi/hook/*'], ['core/runtime/keys-test.sh', 'core/runtime/mod-dex-test.sh', 'core/runtime/ble-test.sh'] + SDK),
     (['core/runtime/java/hmgapi/vehicle/*', 'core/runtime/test/hmgapi/vehicle/*'], ['core/runtime/commands-test.sh'] + SDK),
+    (['core/runtime/java/hmgapi/ble/*', 'core/runtime/test/hmgapi/ble/*', 'core/runtime/test/ble_filter_test.c'], ['core/runtime/ble-test.sh'] + SDK),
     (['core/runtime/stubs/*'], SDK),
     (['core/runtime/*-test.sh'], []),   # a test itself: it runs (select() adds every changed test)
     (['core/hookpoints/*'], SDK),   # the SDK's points.txt and catalogue

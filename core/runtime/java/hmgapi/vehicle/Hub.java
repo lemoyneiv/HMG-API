@@ -85,53 +85,32 @@ public final class Hub {
                 System.out.println("vehicle: " + t);
                 if (s == null) try { Thread.sleep(100); } catch (InterruptedException ignored) {}
             } finally {
-                closeAccepted(s);
+                close(s);
             }
         }
     }
 
-    private static java.lang.reflect.Method ioBridgeClose;
-    private static boolean ioBridgeChecked;
-
     /**
-     * Closes an accepted LocalSocket on Android 4.4.2 KitKat, where LocalServerSocket.accept()
-     * leaves LocalSocketImpl.fdCreatedInternally == false (AOSP Issue 36917), causing s.close()
-     * to null impl.fd without closing the OS file descriptor (stalling hmgapid for EOF and leaking FDs).
+     * Closes an accepted socket's fd. On these units (KitKat) LocalServerSocket.accept() never
+     * marks the socket's fd as its own, so LocalSocket.close() only drops it: the fd stayed
+     * open, hmgapid never saw the end of an answer (every read took its 3 s timeout, #145),
+     * and each connection leaked an fd.
      */
-    static void closeAccepted(LocalSocket s) {
+    static void close(LocalSocket s) {
         if (s == null) return;
         java.io.FileDescriptor fd = null;
         try { fd = s.getFileDescriptor(); } catch (Throwable ignored) {}
         try { s.shutdownOutput(); } catch (Throwable ignored) {}
         try { s.shutdownInput(); } catch (Throwable ignored) {}
-        try { s.close(); } catch (Throwable ignored) {}
-        closeLeakedFd(fd);
-    }
-
-    static void closeLeakedFd(java.io.FileDescriptor fd) {
-        if (fd == null || !fd.valid()) return;
         try {
-            if (!ioBridgeChecked) {
-                ioBridgeChecked = true;
-                try {
-                    ioBridgeClose = Class.forName("libcore.io.IoBridge")
-                            .getMethod("closeAndSignalBlockedThreads", java.io.FileDescriptor.class);
-                } catch (Throwable ignored) {}
-            }
-            if (ioBridgeClose != null) {
-                ioBridgeClose.invoke(null, fd);
-            }
-        } catch (Throwable ignored) {}
-        if (fd.valid()) {
-            try {
-                java.lang.reflect.Field f = java.io.FileDescriptor.class.getDeclaredField("descriptor");
-                f.setAccessible(true);
-                int raw = f.getInt(fd);
-                if (raw >= 0) {
-                    f.setInt(fd, -1);
-                    android.os.ParcelFileDescriptor.adoptFd(raw).close();
-                }
-            } catch (Throwable ignored) {}
+            if (fd != null && fd.valid()) libcore.io.Libcore.os.close(fd);
+        } catch (Throwable t) {
+            System.out.println("vehicle: close: " + t);
+        }
+        try {
+            s.close();
+        } catch (Exception x) {
+            // gone already
         }
     }
 

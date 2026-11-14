@@ -177,7 +177,7 @@ final class SettingsTab {
                 LinearLayout keep = page;
                 page = facts;
                 if (e != null) {
-                    Ui.text(facts, "Can't reach hmgapid: " + e.getMessage(), 17, false, Ui.ERROR);
+                    Ui.text(facts, Hmgapid.unreachable(e), 17, false, Ui.ERROR);
                 } else {
                     String s = r[0];
                     fact("This car", MainActivity.subtitle());

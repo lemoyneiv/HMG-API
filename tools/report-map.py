@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make a car's hook map from Car Reports (the map the car made of itself).
 
-usage: report-map.py <car-report.json>... [--maps DIR] [--status probed]
+usage: report-map.py <car-report.json>... [--maps DIR] [--status probed] [--make M --name N]
 
 Each report holds the on-car mapper's result ("map_car": points, the md5 of every
 file the names came from, what it didn't find). Give one or more reports from the
@@ -22,6 +22,8 @@ def main():
     ap.add_argument('reports', nargs='+')
     ap.add_argument('--maps', default=os.path.join(REPO, 'maps'))
     ap.add_argument('--status', default='probed', choices=('probed', 'mapped'))
+    ap.add_argument('--make', help="the car's make, for a report from a car HMG-API had no name for (its make is null)")
+    ap.add_argument('--name', help="the car's name, the same")
     a = ap.parse_args()
     reps = []
     for f in a.reports:
@@ -29,7 +31,13 @@ def main():
         if r.get('report') != 'hmgapi car report 1' or 'map_car' not in r:
             sys.exit('%s: not a Car Report with an on-car map' % f)
         reps.append((os.path.basename(f), r))
-    u = reps[0][1]['unit']
+    u = dict(reps[0][1]['unit'])
+    if a.make:
+        u['make'] = a.make
+    if a.name:
+        u['name'] = a.name
+    if not u.get('make'):
+        sys.exit("%s: the report has no make (a car HMG-API had no name for): give --make and --name" % reps[0][0])
     key = lambda r: (r['unit']['model'], r['unit']['region'], r['unit']['firmware'])
     for name, r in reps:
         if key(r) != key(reps[0][1]):
@@ -63,6 +71,15 @@ def main():
         'app_files': mc['app_files'],
     }
     missing = {k: v for k, v in mc.get('missing', {}).items()}
+    missing.update(mc.get('not_found', {}))
+    # catalogue points newer than the HMG-API that made the reports: listed, not guessed
+    cat = os.path.join(REPO, 'core', 'hookpoints')
+    for f in sorted(os.listdir(cat)):
+        if f.endswith('.json'):
+            for p in json.load(open(os.path.join(cat, f)))['points']:
+                if p['id'] not in mc['points'] and p['id'] not in missing:
+                    missing[p['id']] = ('not in the Car Report: newer than the HMG-API that made it '
+                                        '(a Car Report from a newer HMG-API maps it)')
     if missing:
         car['missing'] = dict(sorted(missing.items()))
     if mc.get('by_reference'):

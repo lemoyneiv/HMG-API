@@ -83,6 +83,7 @@ final class LiveState {
             for (ModRuntime.App a : d.apps) apps.add(a.pkg);
             if (!apps.isEmpty()) s.put("apps", apps);
             if (!d.usb.isEmpty()) s.put("usb", new java.util.ArrayList<Object>(d.usb));
+            if (d.ble) s.put("ble", true);
             if (!d.notWhileDriving.isEmpty()) s.put("not_while_driving", new java.util.ArrayList<Object>(d.notWhileDriving));
             if (!d.panel.isEmpty()) s.put("panel", new java.util.ArrayList<Object>(d.panel));
             mods.put(m.getKey(), s);

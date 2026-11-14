@@ -10,3 +10,8 @@ stock bytes, and removes the mods' apps.
 - **adb:** `./hmgapi-adb.sh uninstall` (`--purge` also deletes HMG-API's data).
 
 Restart the head unit afterwards.
+
+**After a firmware update:** the update already put the system files back to stock,
+and the uninstall leaves the new firmware's files as they are. Settings mods changed
+stay as they are then; to put those back too, install HMG-API again first, then
+uninstall it. See [Troubleshooting](Troubleshooting#after-a-firmware-update-hmg-apis-system-files-are-gone-or-uninstall-fails).

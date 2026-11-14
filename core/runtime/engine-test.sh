@@ -154,6 +154,33 @@ has "kept trial stays" "persist.wifi.state=3" "$(cat $R/system/build.prop)"
 eng status
 check "status after keep" 0 $rc
 
+# ---- a firmware update put /system back to stock under HMG-API (install.sh runs engine firmware-reset)
+echo '{"extra": false}' > $R/data/hmgapi/settings/moda.json
+eng apply --trial
+check "a trial waiting when the update comes" yes "$([ -f $R/data/hmgapi/state/journal.json ] && echo yes)"
+S=$R/data/hmgapi/stock/system
+for f in lib/libtest.so app/Test.apk app/Test.odex onebin/cvev_us/featurexml.cfg; do cp $S/$f $R/system/$f; done
+printf 'ro.build.product=CVEV.USA.0000.V015\npersist.ium.support=none\nro.other=1\nro.newer=1\n' > $R/system/build.prop
+rm -f $R/system/etc/permissions/a.xml
+NEWPROP=$(md5 $R/system/build.prop)
+eng firmware-reset
+check "firmware-reset" 0 $rc
+has "the trial dropped, not rolled back (that would write the old firmware's files)" "dropped an unfinished apply or trial" "$out"
+check "... no journal" no "$([ -f $R/data/hmgapi/state/journal.json ] && echo yes || echo no)"
+check "... the new build.prop untouched" "$NEWPROP" "$(md5 $R/system/build.prop)"
+has "each replaced file said" "firmware  /system/build.prop: replaced by the update" "$out"
+hasnt "... no file record left" "/system/" "$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["files"]))' $R/data/hmgapi/state/files.json)"
+check "... their backups gone" "" "$(find $R/data/hmgapi/stock -type f)"
+has "... settings still recorded (an update keeps them)" "global/wifi_on" "$(cat $R/data/hmgapi/state/files.json)"
+eng apply
+check "the next apply builds on the new files" 0 $rc
+has "... the mods' props on the new build.prop" "ro.newer=1" "$(cat $R/system/build.prop)"
+has "... and their change" "persist.ium.support=carplay" "$(cat $R/system/build.prop)"
+check "... the added file back" yes "$([ -f $R/system/etc/permissions/a.xml ] && echo yes)"
+eng firmware-reset
+has "firmware-reset with nothing replaced: nothing dropped" "no file HMG-API changed needed dropping" "$out"
+STOCK_PROP=$NEWPROP   # the update's build.prop is stock from here on
+
 # ---- restore everything
 rm -f $R/data/hmgapi/mods/modb/.disabled
 eng restore

@@ -90,6 +90,7 @@ final class Live {
                 ctx.error("onSettingsChanged", t);
             }
         }
+        BleHooks.sync(mods);
         if (app != null && app.context != null) {
             for (String id : mods.keySet()) Mods.lateLoad(id, app, state, new HashSet<String>());
         }

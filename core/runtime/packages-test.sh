@@ -80,9 +80,16 @@ PY
 eng install $T/evil.zip; check "path escape in a zip refused" 1 $rc
 check "nothing written outside" no "$([ -e $R/data/escape.txt ] || [ -e $R/escape.txt ] && echo yes || echo no)"
 
+mkdir -p $R/data/hmgapi/dalvik-cache/demo $R/data/hmgapi/dalvik-cache/other-mod
+echo old > $R/data/hmgapi/dalvik-cache/hooks.dex
+echo demo > $R/data/hmgapi/dalvik-cache/demo/hooks.dex
+echo other > $R/data/hmgapi/dalvik-cache/other-mod/hooks.dex
 eng remove demo; check "remove" 0 $rc
 check "removed" no "$([ -d $R/data/hmgapi/mods/demo ] && echo yes || echo no)"
 check "settings stay after remove" '{"x": 1}' "$(cat $R/data/hmgapi/settings/demo.json)"
+check "obsolete shared DEX removed" no "$([ -e $R/data/hmgapi/dalvik-cache/hooks.dex ] && echo yes || echo no)"
+check "removed mod's central DEX directory removed" no "$([ -e $R/data/hmgapi/dalvik-cache/demo ] && echo yes || echo no)"
+check "another mod's central DEX directory preserved" other "$(cat $R/data/hmgapi/dalvik-cache/other-mod/hooks.dex)"
 
 # "Install anyway": a mod for another head unit, at the owner's risk
 ign() { python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('overrides', {}).get('ignore_system'))" $R/data/hmgapi/settings/hmgapi.json 2>/dev/null; }

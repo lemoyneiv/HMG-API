@@ -21,6 +21,20 @@ final class Hmgapid {
         String output = "";
     }
 
+    /**
+     * What to show when hmgapid can't be reached. With /system/bin/hmgapid gone and
+     * /data/hmgapi still there, a firmware update put /system back to stock: HMG-API's
+     * own files went with it, and installing HMG-API again brings them back.
+     */
+    static String unreachable(Exception e) {
+        if (!new java.io.File("/system/bin/hmgapid").exists()) {
+            return "HMG-API's system files are gone, most likely removed by a firmware update. Install HMG-API again"
+                    + " (NEMESIS or the USB stick): it starts again from the new firmware's files. To remove it instead,"
+                    + " uninstall it in NEMESIS Manager.";
+        }
+        return "Can't reach hmgapid: " + e.getMessage();
+    }
+
     /** Runs one op; blocking (call it off the UI thread). */
     static Result call(String... args) throws IOException {
         return call(60000, args);

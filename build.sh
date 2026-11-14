@@ -30,7 +30,7 @@ loader() {
     clang --target=armv7a-linux-androideabi -mthumb -march=armv7-a -mfloat-abi=softfp -Os -fPIC \
       -ffreestanding -fno-builtin -nostdlib -shared -fno-stack-protector -fuse-ld=lld \
       -Wl,--hash-style=sysv -Wl,-z,defs -Wl,--build-id=none -Wl,-soname,libhmgapi_hook.so \
-      -o "$OUT/libhmgapi_hook.so" core/loader/loader.c "$OUT/syslib/libc.so" "$OUT/syslib/liblog.so" "$OUT/syslib/libdl.so"
+      -o "$OUT/libhmgapi_hook.so" core/loader/loader.c core/loader/ble.c "$OUT/syslib/libc.so" "$OUT/syslib/liblog.so" "$OUT/syslib/libdl.so"
     md5sum "$OUT/libhmgapi_hook.so"
 }
 

@@ -30,12 +30,18 @@ HMG-API runs on any Gen5W navigation head unit. Cars with a hook map get everyth
 on others, mods still install and run, and the app's **Car Report** sends what's
 needed to add your car ([Supported cars](https://github.com/Open-HMG/HMG-API/wiki/Supported-cars)).
 
+After a firmware update, install HMG-API again: the update removes its system files,
+and the install starts again from the new firmware's
+([Troubleshooting](https://github.com/Open-HMG/HMG-API/wiki/Troubleshooting#after-a-firmware-update-hmg-apis-system-files-are-gone-or-uninstall-fails)).
+
 | Car | Region | Software | Hook map |
 |---|---|---|---|
 | Kia EV6 | USA | 260507 | checked on a car |
 | Kia EV6, Hyundai Ioniq 5 | Canada | 260206 | waiting for a Car Report |
 | Hyundai Ioniq 5 | USA | 260507 | waiting for a Car Report |
 | Hyundai Ioniq 5 (2023 on) | USA | 260903 | waiting for a check on a car |
+| Kia Sportage, Telluride, Niro EV, Carnival | USA | 260507 | from Car Reports, waiting for a check on a car |
+| Hyundai Palisade | USA | 260903 | from a Car Report, waiting for a check on a car |
 
 ## Help and requests
 

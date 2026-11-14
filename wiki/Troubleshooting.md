@@ -9,6 +9,22 @@
   reason): restart the head unit and HMG-API tries again, or use **Launch** above,
   which installs it first and then opens it.
 
+## After a firmware update: "HMG-API's system files are gone", or uninstall fails
+
+A firmware update (Navigation Updater, or an update over the air) puts the head unit's
+system files back to stock. HMG-API's own files and the mods' changes to system files
+go with it; HMG-API's data (mods, settings) stays. If NEMESIS is gone too, install it
+again first, or use the USB stick route.
+
+- **To keep using HMG-API:** install it again, any route. It notices the update, drops
+  its backups of the old firmware and starts from the new firmware's files; your mods
+  apply again on them (each one's own checks say if it supports the new firmware).
+- **To remove it:** uninstall it as usual ([Uninstalling](Uninstalling)).
+
+1.0.2 and 1.1.0-beta.1 can't uninstall after a firmware update (NEMESIS says
+"Operation failed"): install HMG-API 1.1.0 or newer over it first, then uninstall
+it if you want to.
+
 ## The top bar says "Hooks off for this car"
 
 HMG-API still works; only the parts of mods that change the car's own apps wait.

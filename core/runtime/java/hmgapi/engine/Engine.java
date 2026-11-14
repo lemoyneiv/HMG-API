@@ -322,6 +322,7 @@ public final class Engine {
         if ("nemesis-sync".equals(cmd)) return NemesisSync.run(this);
         if ("recover".equals(cmd)) return recover();
         if ("keep".equals(cmd)) return keep();
+        if ("firmware-reset".equals(cmd)) return firmwareReset();
         if (journalFile.exists() && !"keep".equals(cmd)) {
             out.add("an earlier apply isn't finished or is a trial: run `engine keep` (trial) or `engine recover` first");
             return 1;
@@ -334,7 +335,7 @@ public final class Engine {
             if (!map.runnable) out.add("hooks are off on this car (" + map.reason + "): mods apply without their hooks");
         }
         if (!restoreAll && !"plan".equals(cmd) && !"apply".equals(cmd)) {
-            out.add("usage: engine plan | apply [--trial] | keep | restore | status | recover | install <zip|dir> | remove <id> | nemesis-sync | map | map-car [--write] | verify-map | report [--usb] | usb-scan | update-hmgapi <zip> | publish-state | apps");
+            out.add("usage: engine plan | apply [--trial] | keep | restore | status | recover | firmware-reset | install <zip|dir> | remove <id> | nemesis-sync | map | map-car [--write] | verify-map | report [--usb] | usb-scan | update-hmgapi <zip> | publish-state | apps");
             return 2;
         }
         Plan p = plan(restoreAll, force);
@@ -1979,6 +1980,46 @@ public final class Engine {
         journalFile.delete();
         rm(prevDir);
         out.add(Boolean.TRUE.equals(j.get("trial")) ? "trial undone" : "unfinished apply rolled back");
+        return 0;
+    }
+
+    /**
+     * A firmware update put /system back to stock under HMG-API (install.sh finds its wrapper
+     * gone): every file HMG-API changed that isn't its result any more is the new firmware's
+     * stock now. Its record and backup go (they hold the old firmware's bytes, which must never
+     * be written back), and so does an unfinished apply or trial (rolling it back would write
+     * old files too). Settings stay recorded: an update keeps them. The next apply builds the
+     * mods' changes on the new files, each against its own stock check.
+     */
+    @SuppressWarnings("unchecked")
+    int firmwareReset() throws Exception {
+        if (journalFile.exists()) {
+            journalFile.delete();
+            out.add("dropped an unfinished apply or trial from before the firmware update");
+        }
+        rm(prevDir);
+        Map<String, Object> state = loadState();
+        Map<String, Object> files = (Map<String, Object>) state.get("files");
+        int n = 0;
+        for (java.util.Iterator<Map.Entry<String, Object>> it = files.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, Object> e = it.next();
+            String path = e.getKey();
+            String live = md5(sys(path));
+            if (live.equals(((Map<String, Object>) e.getValue()).get("result"))) continue;   // the update didn't touch it
+            it.remove();
+            backup(path).delete();
+            new File(backup(path).getPath() + ".absent").delete();
+            if (Boolean.TRUE.equals(((Map<String, Object>) e.getValue()).get("app"))) {   // an app: its odex beside it, and the dalvik-cache copy
+                String odex = path.replaceAll("\\.apk$", ".odex");
+                backup(odex).delete();
+                if (sys(odex).isFile()) dalvik(path, sys(odex), false);
+            }
+            out.add("firmware  " + path + ": replaced by the update (now " + live + "), HMG-API's record and backup of it dropped");
+            n++;
+        }
+        write(stateFile, Json.write(state));
+        out.add(n == 0 ? "firmware update: no file HMG-API changed needed dropping"
+                : "firmware update: " + n + " file(s) are the new firmware's stock now; the next apply puts the mods' changes on them");
         return 0;
     }
 

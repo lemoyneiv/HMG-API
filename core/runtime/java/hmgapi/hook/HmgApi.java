@@ -152,6 +152,8 @@ final class HmgApi {
                 if (Points.need("Android Auto projection", "gpm")) ProjectionHooks.gpm(app);
             } else if ("com.daudio.app.dipo".equals(app.packageName)) {
                 if (Points.need("CarPlay projection", "dipo")) ProjectionHooks.dipo(app);
+            } else if (BleHooks.PACKAGE.equals(app.packageName)) {
+                BleHooks.init(app);
             }
             else if (Mods.APP_PACKAGE.equals(app.packageName)) {
                 Hooks.findClass("hmgapi.app.HmgApiStatus", app.classLoader).getField("json")

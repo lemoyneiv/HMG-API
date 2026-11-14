@@ -37,6 +37,7 @@ setting). It never edits your code.
 | a page in the right-hand split-screen panel | `"provides": {"panel": [{"title": "Battery", "widget": "<your app>/.MyWidget"}]}`: a standard Android app widget from your app (example: `mods/examples/side-panel`) |
 | Android Auto settings and events | `"projection"` (see Phone projection) |
 | firewall rules, routes, network settings | `"network"` (see Network): HMG-API keeps them in place, the stock firewall can't take them away |
+| Bluetooth Low Energy devices | `"ble": {"central": true}` and `hmgapi.client.Ble` (see Bluetooth Low Energy): scan and use BLE GATT peripherals alongside phone calls and audio, no root |
 | your app closed while driving | `"not_while_driving": ["<your app's package>"]`: the car's own driving restriction and popup |
 | feature flags, the Wi-Fi client, codecs, keyboard lists | see Files and settings that several mods share |
 
@@ -281,6 +282,61 @@ sysctl comes back).
 - By hand: `hmgapid sh 'sh /data/hmgapi/state/net.sh once'` checks once;
   `.../net.sh down` takes everything out. The keeper's log:
   `/data/hmgapi/logs/hmgapi/net.log`.
+
+## Bluetooth Low Energy
+
+```json
+"ble": {"central": true}
+```
+
+Gen5W's Bluetooth app ships with Android's `BluetoothGattService` turned off in its
+resources, so `BluetoothAdapter.startLeScan` and `BluetoothDevice.connectGatt` do
+nothing even though the Broadcom controller supports BLE 4.2 alongside Classic
+Bluetooth. While at least one enabled mod declares `"ble": {"central": true}`,
+HMG-API opens `@hmgapi-ble` inside `com.android.bluetooth` directly on the Bluedroid
+HCI/ACL transport:
+
+```java
+Ble ble = Ble.connect(new Ble.SimpleListener() {
+    @Override public void onAdvertisement(Ble.AdvRecord adv) {
+        if ("BVM02".equals(adv.localName)) {
+            ble.stopScan();
+            ble.connectDevice(adv.mac, adv.addrType, "fff0");
+        }
+    }
+    @Override public void onGattReady(String mac, int mtu) {
+        ble.enableNotifications(mac, "fff1");
+    }
+    @Override public void onCharacteristicChanged(String mac, String uuid, byte[] value) {
+        // notification or indication payload
+    }
+});
+ble.startScan();
+```
+
+- **Coexistence:** only LE events and tracked LE connection handles are handled by
+  HMG-API; Classic Bluetooth handles, L2CAP packet credits and command credits pass
+  through to stock Bluedroid, so HFP calls, A2DP music and CarPlay/Android Auto
+  pairing aren't disturbed. Controller `LE_Host_Support` is enabled only while an
+  open BLE session is active and restored to `(0, 0)` when the last session closes,
+  and the native filter returns to a pass-through. Turning Bluetooth off closes open
+  `Ble` clients with `closeReason() == "BT_OFF"` and re-attaches cleanly on the next
+  session once Bluetooth is back on.
+- **Shared across mods:** several mods can scan and hold connections at the same time
+  (up to four peripherals at once on controllers with dedicated LE ACL buffers;
+  active scan uses a 33% duty cycle for audio coexistence and pauses briefly while a
+  connection is opening).
+- **GATT operations** (`hmgapi.client.Ble`, bundled from `hmgapi-client.jar`):
+  16-bit and 128-bit service/characteristic/CCCD discovery (`connectDevice`, optional
+  service UUID filter), `requestMtu` (23–517 bytes, fragmented over 27-byte LE ACL
+  frames), `readCharacteristic`, `readCharacteristicBlob`, `readLongCharacteristic`,
+  `writeCharacteristic` (with or without response), `protectCharacteristic` (refuses
+  writes to a read-only attribute on that link), `enableNotifications`,
+  `enableIndications` and `disableNotifications`.
+- **Who may connect:** your mod's own apps (`"apps"`, matched by UID) and
+  `"services"` (matched by `hmgapid` session ID), while the mod is enabled. Turning
+  the mod off closes its BLE sessions (`closeReason() == "MOD_DISABLED"`) and
+  disconnects its peripherals at once without touching other mods.
 
 ## Files and settings that several mods share
 

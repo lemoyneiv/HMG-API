@@ -35,16 +35,33 @@ log "HMG-API uninstall $(date)"
 B=$ROOT/system/bin/app_process
 KEEP=$ROOT/system/bin/app_process.hmgapi-stock
 BAK=$D/stock/system/bin/app_process
-[ -f "$BAK" ] || fail "no stock app_process backup in $D/stock; nothing changed"
-ORIG=$(sum "$BAK")
-known=
-while read m label; do [ "$m" = "$ORIG" ] && known=$label; done < "$H/stock.txt"
-if [ -z "$known" ] && [ "$HMGAPI_FORCE" != 1 ]; then
-    fail "the app_process backup (md5 $ORIG) isn't a known stock build, so nothing was changed. To restore it anyway, at your own risk, set HMGAPI_FORCE=1."
+# a firmware update since the install put /system back to stock: HMG-API's wrapper and its stock
+# copy are gone (and hmgapid and the engine with them). app_process is the new firmware's own then,
+# and the backups hold the old firmware's bytes: they never go back. Mods' file changes went with
+# the update; what's left is /data, settings and the NEMESIS listings.
+WRAPPED=
+[ -f "$D/installed.txt" ] && while read k m f; do [ "$k $f" = "file /system/bin/app_process" ] && WRAPPED=$m; done < "$D/installed.txt"
+RESET=
+LIVE=$(sum "$B")
+if [ ! -f "$KEEP" ] && [ -n "$WRAPPED" ] && [ "$LIVE" != "$WRAPPED" ]; then
+    RESET=1
+    log "a firmware update replaced /system since HMG-API was installed: app_process is the new firmware's ($LIVE) and stays, and the old firmware's backups aren't put back"
+else
+    [ -f "$BAK" ] || fail "no stock app_process backup in $D/stock; nothing changed"
+    ORIG=$(sum "$BAK")
+    known=
+    while read m label; do [ "$m" = "$ORIG" ] && known=$label; done < "$H/stock.txt"
+    if [ -z "$known" ] && [ "$HMGAPI_FORCE" != 1 ]; then
+        fail "the app_process backup (md5 $ORIG) isn't a known stock build, so nothing was changed. To restore it anyway, at your own risk, set HMGAPI_FORCE=1."
+    fi
 fi
 
 # 1. mods: every changed file and setting back to stock, while the engine is still here
-if [ -z "$ROOT" ] && [ -f "$D/state/files.json" ]; then
+if [ -n "$RESET" ]; then
+    # the next install drops the old firmware's records and backups (install.sh, engine firmware-reset)
+    : > "$D/firmware-reset"
+    [ -f "$D/state/files.json" ] && log "mods' file changes went with the firmware update. Settings mods changed stay as they are: to put them back too, install HMG-API again, then uninstall it"
+elif [ -z "$ROOT" ] && [ -f "$D/state/files.json" ]; then
     /system/bin/hmgapid ping >/dev/null 2>&1 || /system/bin/hmgapid daemon >/dev/null 2>&1   # the engine runs through it
     [ -f "$D/state/journal.json" ] && /system/bin/hmgapid engine recover
     if ! r=$(/system/bin/hmgapid engine restore 2>&1); then
@@ -93,13 +110,17 @@ fi
 # 4. /system back
 remount rw || fail "can't remount /system rw"
 REMOUNTED=1
-if [ "$(sum "$B")" != "$ORIG" ]; then
-    cp "$BAK" "$B.hmgapi-new" || fail "copy the app_process backup"
-    chmod 755 "$B.hmgapi-new"; chown root:shell "$B.hmgapi-new" 2>/dev/null
-    [ "$(sum "$B.hmgapi-new")" = "$ORIG" ] || { rm -f "$B.hmgapi-new"; fail "app_process md5 mismatch after copy"; }
-    mv "$B.hmgapi-new" "$B" || { rm -f "$B.hmgapi-new"; fail "rename onto app_process"; }
+if [ -n "$RESET" ]; then
+    log "app_process: the new firmware's, left as it is"
+else
+    if [ "$(sum "$B")" != "$ORIG" ]; then
+        cp "$BAK" "$B.hmgapi-new" || fail "copy the app_process backup"
+        chmod 755 "$B.hmgapi-new"; chown root:shell "$B.hmgapi-new" 2>/dev/null
+        [ "$(sum "$B.hmgapi-new")" = "$ORIG" ] || { rm -f "$B.hmgapi-new"; fail "app_process md5 mismatch after copy"; }
+        mv "$B.hmgapi-new" "$B" || { rm -f "$B.hmgapi-new"; fail "rename onto app_process"; }
+    fi
+    log "app_process: stock again ($ORIG)"
 fi
-log "app_process: stock again ($ORIG)"
 rm -f "$KEEP"
 hook_remove /system/etc/install-recovery.sh || fail "boot hook in install-recovery.sh"
 hook_remove /system/etc/qb_runtime.sh || fail "boot hook in qb_runtime.sh"
@@ -113,7 +134,7 @@ REMOUNTED=
 for f in /system/lib/libhmgapi_hook.so /system/framework/hmgapi-hook.jar /system/bin/lpatch /system/bin/hmgapid /system/bin/app_process.hmgapi-stock; do
     [ ! -e "$ROOT$f" ] || fail "$f is still there"
 done
-[ "$(sum "$B")" = "$ORIG" ] || fail "app_process isn't stock after the restore"
+[ -n "$RESET" ] || [ "$(sum "$B")" = "$ORIG" ] || fail "app_process isn't stock after the restore"
 log "/system: HMG-API's files removed, app_process and boot scripts stock"
 
 # 5. the app

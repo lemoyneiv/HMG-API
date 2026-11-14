@@ -78,6 +78,7 @@ final class ModRuntime {
         final List<String> notWhileDriving = new ArrayList<String>();
         final List<Map<String, Object>> panel = new ArrayList<Map<String, Object>>();
         final List<Keys.Binding> input = new ArrayList<Keys.Binding>();
+        boolean ble;
         Projection.Ask projection;
         Network.Ask network;
         final List<String> errors = new ArrayList<String>();
@@ -184,6 +185,13 @@ final class ModRuntime {
                 if (!f.matches("[A-Za-z0-9_][A-Za-z0-9 ._-]{0,63}") || f.contains(" ")) d.errors.add(id + ": usb folder \"" + f + "\": one folder name, no spaces");
                 else d.usb.add(f);
             }
+        }
+        Object ble = mod.get("ble");
+        if (ble != null) {
+            Map<String, Object> bm = ble instanceof Map ? (Map<String, Object>) ble : null;
+            Object central = bm == null ? null : bm.get("central");
+            if (bm == null || bm.size() != 1 || !(central instanceof Boolean)) d.errors.add(id + ": ble: needs {\"central\": true}");
+            else d.ble = Boolean.TRUE.equals(central);
         }
         Object veh = mod.get("vehicle");
         Object reads = veh instanceof Map ? ((Map<String, Object>) veh).get("read") : null;
@@ -380,6 +388,7 @@ final class ModRuntime {
                         + (s.restart ? ", restarted if it stops" : "") + " [" + id + "]");
             }
             for (String f : d.usb) out.add("usb      " + f + "/ on a stick [" + id + "]");
+            if (d.ble) out.add("ble      BLE scanner and GATT central [" + id + "]");
             if (!d.readings.isEmpty()) out.add("vehicle  reads " + join(d.readings) + " [" + id + "]");
             for (String c : d.commands) out.add("vehicle  may " + c + " (" + Vehicle.COMMANDS.get(c).guard + ") [" + id + "]");
             for (String p : d.notWhileDriving) out.add("driving  " + p + " closes while the car's driving restriction is on [" + id + "]");

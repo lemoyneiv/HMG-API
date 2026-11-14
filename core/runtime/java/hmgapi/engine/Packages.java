@@ -210,6 +210,9 @@ final class Packages {
             return 1;
         }
         Engine.rm(installed);
+        File cache = new File(e.data, "dalvik-cache");
+        DexCacheCleanup.removeObsoleteShared(cache);
+        DexCacheCleanup.removeMod(cache, id);
         ignoreSystem(e, id, false);
         LiveState.publish(e);
         e.out.add("removed " + id + " (its settings stay in /data/hmgapi/settings); run `engine apply` to put its files back to stock");

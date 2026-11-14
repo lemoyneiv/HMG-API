@@ -104,6 +104,29 @@ else
     fail "app_process md5 $HAVE isn't a known stock build, so nothing was changed. Please send this line to the HMG-API maintainers. To install anyway, at your own risk: an empty file HMGAPI/FORCE on the USB stick, or HMGAPI_FORCE=1 over adb."
 fi
 
+# a firmware update since HMG-API was installed put /system back to stock: the wrapper and its
+# stock copy are gone, but /data/hmgapi still says installed (or an uninstall afterwards left
+# the firmware-reset mark, or the app_process backup isn't this stock). The backups and records
+# hold the old firmware's bytes, which must never go back: they're dropped (the engine's own:
+# engine firmware-reset, from the payload's jar) and this install starts from the files as they are.
+BAK=$D/stock/system/bin/app_process
+if [ -z "$UPDATE" ] && { [ -f "$D/installed.txt" ] || [ -f "$D/firmware-reset" ] || { [ -s "$BAK" ] && [ "$(sum "$BAK")" != "$HAVE" ]; }; }; then
+    log "a firmware update replaced /system since HMG-API was installed: starting again from the new firmware's files"
+    r=
+    if [ -z "$ROOT" ]; then
+        r=$(CLASSPATH=$P/hmgapi-hook.jar ANDROID_ROOT=/system ANDROID_DATA=/data /system/bin/app_process /system/bin hmgapi.engine.Engine firmware-reset 2>&1) \
+            || fail "engine firmware-reset: $r. Nothing on /system was changed."
+    elif [ -n "$HMGAPI_TEST_ENGINE" ]; then
+        r=$($HMGAPI_TEST_ENGINE firmware-reset 2>&1) || fail "engine firmware-reset: $r. Nothing on /system was changed."
+    fi
+    [ -n "$r" ] && log "$r"
+    for f in /system/bin/app_process /system/etc/install-recovery.sh /system/etc/qb_runtime.sh; do
+        rm -f "$D/stock$f" "$D/stock$f.absent"
+    done
+    rm -f "$D/firmware-reset"
+    log "the old firmware's backups of app_process and the boot scripts dropped; new ones are taken now"
+fi
+
 # this boot's boot steps are done: an install does what they would (the app, the NEMESIS
 # sync). NEMESIS starts HMG-API's boot service after an install, and after each listing
 # the sync makes; on a unit that started with an older hmgapid there's no marker yet, and

@@ -179,4 +179,71 @@ run $P/install.sh $P
 run $R/data/hmgapi/uninstall.sh --purge
 check "reinstall + purge: /system stock" "$BEFORE" "$(tree)"
 check "purge removes /data/hmgapi" no "$([ -e $R/data/hmgapi ] && echo yes || echo no)"
+# ---- a firmware update after the install: /system back to stock (a new app_process, the boot
+# scripts without HMG-API's block, HMG-API's files gone), /data/hmgapi as it was
+printf '#!/bin/sh\necho "engine $*" >> "%s/calls.log"\necho "firmware update: 1 file(s) are the new firmware'"'"'s stock now"\n' "$T" > $T/bin/engine; chmod +x $T/bin/engine
+firmware_update() {
+    rm -f $R/system/bin/hmgapid $R/system/bin/lpatch $R/system/lib/libhmgapi_hook.so $R/system/framework/hmgapi-hook.jar $R/system/bin/app_process.hmgapi-stock
+    cp $T/newfw $R/system/bin/app_process
+    printf '#!/system/bin/sh\n# NEMESIS\nnemesis watchdog\nexit 0\n' > $R/system/etc/install-recovery.sh
+    printf 'echo qb stock\n# NEMESIS_QB_HOOK\nnemesis watchdog\n' > $R/system/etc/qb_runtime.sh
+}
+head -c 9000 /dev/urandom > $T/newfw; chmod 755 $T/newfw
+echo "$(md5sum < $T/newfw | cut -c1-32) test new firmware" >> $P/stock.txt
+(cd $P && md5sum hmgapid lpatch app_process libhmgapi_hook.so hmgapi-hook.jar HmgApi.apk install.sh uninstall.sh lib.sh stock.txt app-pending.sh app-open.sh hook-check.sh boot.sh MAPS.md5 > MANIFEST)
+export HMGAPI_TEST_ENGINE=$T/bin/engine
+run $P/install.sh $P
+mkdir -p $R/data/hmgapi/state; echo '{"files": {}, "settings": {}}' > $R/data/hmgapi/state/files.json
+firmware_update; NEWFW=$(tree); calls >/dev/null
+
+# (a) installed again over it
+run $P/install.sh $P
+has "firmware update, then install: found" "a firmware update replaced /system since HMG-API was installed" "$out"
+check "... the engine drops its old-firmware records first" "engine firmware-reset" "$(calls | grep '^engine firmware' || true)"
+has "... said" "file(s) are the new firmware's stock now" "$out"
+has "... installs" "installed. Restart the head unit" "$out"
+check "... the new firmware's app_process is the backup now" "$(md5sum < $T/newfw)" "$(md5sum < $R/data/hmgapi/stock/system/bin/app_process)"
+check "... and kept beside the wrapper" "$(md5sum < $T/newfw)" "$(md5sum < $R/system/bin/app_process.hmgapi-stock)"
+check "... one boot hook" 1 "$(grep -c 'HMGAPI_HOOK begin' $R/system/etc/install-recovery.sh)"
+run $P/install.sh $P
+check "an update after that isn't a firmware reset" "" "$(calls | grep '^engine firmware' || true)"
+run $R/data/hmgapi/uninstall.sh
+has "... uninstall finishes" "HMG-API uninstalled" "$out"
+check "... /system is the new firmware's stock" "$NEWFW" "$(tree)"
+
+# (b) uninstalled after it (NEMESIS Manager's Uninstall; hmgapid and the engine are gone)
+run $P/install.sh $P
+cp $T/real $R/data/hmgapi/stock/system/bin/app_process   # the old firmware's backup, as an install before the update took it
+firmware_update; calls >/dev/null
+mkdir -p $R/data/nemesis/apps/hmgapi/scripts; printf '[nemesis]\nid=hmgapi\n' > $R/data/nemesis/apps/hmgapi/NEMESIS.data
+cp install/nemesis/scripts/*.sh $R/data/nemesis/apps/hmgapi/scripts/
+set +e; out=$(cd $R/data/nemesis/apps/hmgapi && env PATH="$T/bin:$PATH" ROOT=$R CAPCHECK=0 $R/system/xbin/nemesis uninstall hmgapi 2>&1); rc=$?; set -e
+check "firmware update, then NEMESIS uninstall: works" 0 $rc
+has "... found the update" "a firmware update replaced /system since HMG-API was installed" "$out"
+has "... says what stays" "Settings mods changed stay as they are" "$out"
+check "... unlisted" no "$([ -d $R/data/nemesis/apps/hmgapi ] && echo yes || echo no)"
+check "... the old firmware's app_process never put back: /system is the new firmware's stock" "$NEWFW" "$(tree)"
+check "... marked for the next install" yes "$([ -f $R/data/hmgapi/firmware-reset ] && echo yes)"
+run $P/install.sh $P
+has "... install after that: starts from the new firmware" "a firmware update replaced /system since HMG-API was installed" "$out"
+check "... engine firmware-reset" "engine firmware-reset" "$(calls | grep '^engine firmware' || true)"
+check "... new backup" "$(md5sum < $T/newfw)" "$(md5sum < $R/data/hmgapi/stock/system/bin/app_process)"
+check "... mark gone" no "$([ -f $R/data/hmgapi/firmware-reset ] && echo yes || echo no)"
+run $R/data/hmgapi/uninstall.sh --purge
+check "... uninstall: /system is the new firmware's stock" "$NEWFW" "$(tree)"
+
+# (c) a firmware update after an uninstall (only the backup tells): reinstall takes a new one
+run $P/install.sh $P
+run $R/data/hmgapi/uninstall.sh
+cp $T/real $R/data/hmgapi/stock/system/bin/app_process
+cp $T/real $R/system/bin/app_process
+calls >/dev/null
+run $P/install.sh $P
+check "uninstalled, same firmware: no reset" "" "$(calls | grep '^engine firmware' || true)"
+run $R/data/hmgapi/uninstall.sh
+cp $T/real $R/data/hmgapi/stock/system/bin/app_process; cp $T/newfw $R/system/bin/app_process
+run $P/install.sh $P
+check "uninstalled, then a firmware update: the stale backup found, reset" "engine firmware-reset" "$(calls | grep '^engine firmware' || true)"
+check "... new backup" "$(md5sum < $T/newfw)" "$(md5sum < $R/data/hmgapi/stock/system/bin/app_process)"
+unset HMGAPI_TEST_ENGINE
 exit $fail

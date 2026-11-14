@@ -21,11 +21,16 @@ mod SDK ([mod-repos.md](mod-repos.md), section 4).
 
 | Car | Map | Points |
 |---|---|---|
+| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 343 of 351 |
 | Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 351 of 351 |
 | Hyundai Ioniq 5 USA 260507 | mapped from stock files | 351 of 351 |
 | Hyundai Ioniq 5 USA 260903 | mapped on cars by HMG-API's own mapper | 351 of 351 |
 | Kia EV6 CAN 260206 | mapped from stock files | 351 of 351 |
 | Kia EV6 USA 260507 | checked on a car | 351 of 351 |
+| Kia Carnival USA 260507 | mapped on cars by HMG-API's own mapper | 343 of 351 |
+| Kia Sportage USA 260507 | mapped on cars by HMG-API's own mapper | 351 of 351 |
+| Kia Telluride USA 260507 | mapped on cars by HMG-API's own mapper | 351 of 351 |
+| Kia Niro EV USA 260507 | mapped on cars by HMG-API's own mapper | 343 of 351 |
 
 In the tables, **Cars** is "all" when every car above has the point, otherwise the cars without it.
 
@@ -135,10 +140,10 @@ Android framework and the car's service interfaces (any process).
 | `framework.hscan_service.battery_12v_soc` | method | `getBatSoc()` → int | 12V battery state of charge, % | all |
 | `framework.hscan_service.hv_health` | method | `getXEV_Bms_GDS_SOH()` → int |  | all |
 | `framework.hscan_service.charging_status` | method | `getChargingStatus()` → int |  | all |
-| `framework.hscan_service.battery_12v_sensor_state` | method | `getBATSNSRState()` → byte | 12V battery sensor's state (raw) | all |
-| `framework.hscan_service.battery_12v_sensor_invalid` | method | `getBATSNSRInvalid()` → byte | 12V battery sensor's invalid flag (raw) | all |
-| `framework.hscan_service.battery_12v_sensor_error` | method | `getBATSNSRError()` → byte | 12V battery sensor's error flag (raw) | all |
-| `framework.hscan_service.battery_12v_saver` | method | `get_BAT_AuxBattOpt()` → byte | the Auxiliary Battery Saver option (raw) | all |
+| `framework.hscan_service.battery_12v_sensor_state` | method | `getBATSNSRState()` → byte | 12V battery sensor's state (raw) | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
+| `framework.hscan_service.battery_12v_sensor_invalid` | method | `getBATSNSRInvalid()` → byte | 12V battery sensor's invalid flag (raw) | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
+| `framework.hscan_service.battery_12v_sensor_error` | method | `getBATSNSRError()` → byte | 12V battery sensor's error flag (raw) | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
+| `framework.hscan_service.battery_12v_saver` | method | `get_BAT_AuxBattOpt()` → byte | the Auxiliary Battery Saver option (raw) | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
 | `framework.car_services` | class | `com.hkmc.Service` | the car services' registered names | all |
 | `framework.car_services.system` | field | `static SYSTEM_SERVICE`: String |  | all |
 | `framework.car_services.hev` | field | `static HEV_SERVICE`: String |  | all |
@@ -307,10 +312,10 @@ App `com.daudio.app.dipo`.
 | `dipo.carplay.session_finalized` | method | `onSessionFinalized(int)` → void | a CarPlay session ended | all |
 | `dipo.carplay.iap_message` | method | `oniAPSendMessage(byte[], int)` → void | iAP2 bytes the phone sent over the CarPlay session's own channel | all |
 | `dipo.carplay.native_iap_send` | method | `TccCarPlayNativeMethod_iAPSendMessage(byte[], int)` → int | sends iAP2 bytes to the phone over the CarPlay session's channel (0: sent) | all |
-| `dipo.carplay.disable_bluetooth` | method | `onDisableBluetooth(String)` → void | the CarPlay library's disableBluetooth, about 80 ms into a session: DiPO then disconnects the phone's Bluetooth (wired CarPlay's way) | all |
-| `dipo.carplay.decode_failure` | method | `onNotifyDecodeFailure(int)` → void | the CarPlay video decoder reported a failure (1 no output frame, 2 sequence header failed, 3 black screen; 0 resets the black-screen count). Stock DiPO only logs it | all |
-| `dipo.carplay.screen_timeout` | method | `onScreenTimeout()` → void | the CarPlay screen stream got no data for the library's timeout (10 s on these units). Stock DiPO only sets a flag | all |
-| `dipo.carplay.force_key_frame` | method | `forceKeyFrame()` → com.daudio.app.dipo.telechips.CarPlayReturn | asks the phone for a new key frame (IDR) on the CarPlay screen stream. Stock DiPO never calls it | all |
+| `dipo.carplay.disable_bluetooth` | method | `onDisableBluetooth(String)` → void | the CarPlay library's disableBluetooth, about 80 ms into a session: DiPO then disconnects the phone's Bluetooth (wired CarPlay's way) | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
+| `dipo.carplay.decode_failure` | method | `onNotifyDecodeFailure(int)` → void | the CarPlay video decoder reported a failure (1 no output frame, 2 sequence header failed, 3 black screen; 0 resets the black-screen count). Stock DiPO only logs it | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
+| `dipo.carplay.screen_timeout` | method | `onScreenTimeout()` → void | the CarPlay screen stream got no data for the library's timeout (10 s on these units). Stock DiPO only sets a flag | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
+| `dipo.carplay.force_key_frame` | method | `forceKeyFrame()` → com.daudio.app.dipo.telechips.CarPlayReturn | asks the phone for a new key frame (IDR) on the CarPlay screen stream. Stock DiPO never calls it | not on Hyundai Palisade USA 260903, Kia Carnival USA 260507, Kia Niro EV USA 260507 |
 | `dipo.iap2_listener` | class | a class in `com.daudio.app.dipo` (no fixed name) | DiPO's own iAP2 listener (connected, disconnected, notify from the iAP2 server) | all |
 | `dipo.iap2_listener.connected` | method | `connected(int, String)` → void | an iAP2 session is up (component: 1 USB, 4 Bluetooth CarPlay, 5 the CarPlay session's channel) | all |
 | `dipo.iap2_listener.disconnected` | method | `disconnected(int)` → void | an iAP2 session ended (component) | all |

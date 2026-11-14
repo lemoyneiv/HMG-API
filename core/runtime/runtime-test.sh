@@ -283,4 +283,24 @@ touch "$D/mods/tube/.disabled"
 eng publish-state
 check "mod off: no readings" "" "$(cat $D/state/vehicle.txt)"
 check "... and no vehicle service" "" "$(grep '^hmgapi vehicle ' $D/state/services.txt)"
+
+# BLE central declaration
+mkdir -p "$D/mods/batt/app" "$D/mods/badble"
+echo b > "$D/mods/batt/app/Batt.apk"
+cat > "$D/mods/batt/mod.json" <<'J'
+{"id": "batt", "version": "1.0.0",
+ "apps": [{"apk": "app/Batt.apk", "package": "dev.example.batt"}],
+ "ble": {"central": true}}
+J
+printf '{"id": "badble", "version": "1.0.0", "ble": true}\n' > "$D/mods/badble/mod.json"
+eng publish-state
+has "state.json marks BLE for com.android.bluetooth" '"batt":{"enabled":true,"version":"1.0.0","live":false,"settings":{},"apps":["dev.example.batt"],"ble":true}' "$(tr -d ' \n' < $D/public/state.json)"
+has "bad ble declaration reported" 'badble: ble: needs {"central": true}' "$out"
+check "no unused state/ble.txt written" no "$([ -e "$D/state/ble.txt" ] && echo yes || echo no)"
+eng plan
+has "plan: ble" "ble      BLE scanner and GATT central [batt]" "$out"
+has "plan: bad ble problem" 'problem  badble: ble: needs {"central": true}' "$out"
+touch "$D/mods/batt/.disabled"
+eng publish-state
+has "mod off: state.json marks batt disabled" '"batt":{"enabled":false,"version":"1.0.0","live":false,"settings":{},"apps":["dev.example.batt"],"ble":true}' "$(tr -d ' \n' < $D/public/state.json)"
 exit $fail

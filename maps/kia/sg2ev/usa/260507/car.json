@@ -1,0 +1,145 @@
+{
+  "make": "kia",
+  "model": "sg2ev",
+  "name": "Niro EV",
+  "region": "usa",
+  "firmware": "260507",
+  "products": [
+    "SG2EV.USA."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "f239d4bbb4f78d637bcf20b653254b16",
+    "/system/app/HKMC_BtSettings.odex": "8c6f5012c978ae053df325b80cd9e56e",
+    "/system/app/HKMC_DiPO.odex": "6953fa525b2a2fe4252250f38296c837",
+    "/system/app/HKMC_GPM.odex": "c4f751a36be916e72cf93df0436d63c2",
+    "/system/app/HKMC_HomeSetting_WP.odex": "73e5fdc5cbe15e2669ce8555d3c9785a",
+    "/system/app/Iap2ServerApp.odex": "f3e22d94150de40f4ed603798358b0e3",
+    "/system/app/Launcher_WP3.odex": "b20d71e51b041bd64e56ddaf9a4b5328",
+    "/system/app/RightScreenHome.odex": "7b84ed639e85a711c4a9f2c78e33acf4",
+    "/system/app/Settings_W.odex": "40b6ef93bc1100f957becadd0bbfc54c",
+    "/system/app/ThemeSettings.odex": "83342e8faeb3a59c3e6f85b15a54363d",
+    "/system/framework/automotive-service.odex": "8c49d98c8bc9d51f16b6b25186dedf3d",
+    "/system/framework/automotive.odex": "6a8b149291a76de52a00656728f4017e",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "a2dc61a23636dd0a1bdce7a8ecc206ec",
+    "/system/framework/com.tcc.iap2.odex": "9eb8689b80bbb21f507675a3b364fd26",
+    "/system/framework/core.odex": "806629f121a2e31e2a3ad6f821ab99c3",
+    "/system/framework/framework.odex": "d592b4c9cbba3f2fe3951edf8cc101d0",
+    "/system/framework/framework2.odex": "fcd2771ee2eaa101a3636143d783f924"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "dipo.carplay.decode_failure": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.disable_bluetooth": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.force_key_frame": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.screen_timeout": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_saver": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_error": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_invalid": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_state": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "btsettings.projection_helper.device_connections_available",
+    "btsettings.projection_helper.open_device_connections",
+    "btsettings.projection_helper.open_other_page",
+    "btsettings.projection_helper.open_wireless_page",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.home.test_page",
+    "panel.test_gate",
+    "panel.test_gate.on",
+    "panel.test_page",
+    "themesettings.split_item.type"
+  ]
+}

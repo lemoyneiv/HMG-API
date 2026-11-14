@@ -17,6 +17,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import hmgapi.engine.DexCacheCleanup;
 import hmgapi.engine.Json;
 import hmgapi.engine.SystemCheck;
 
@@ -216,6 +217,7 @@ final class Mods {
     static final List<LauncherEntry> launcher = new ArrayList<LauncherEntry>();
     static final List<Loaded> withHooks = new ArrayList<Loaded>();
     static hmgapi.engine.HookPlan plan;
+    static final java.util.Set<String> installedIds = new java.util.LinkedHashSet<String>();
 
     static void load() {
         try {
@@ -238,6 +240,7 @@ final class Mods {
         for (File dir : dirs) {
             if (!dir.isDirectory()) continue;
             String id = dir.getName();
+            if (DexCacheCleanup.validModId(id)) installedIds.add(id);
             dirOf.put(id, dir);
             if ("hmgapi".equals(id) || new File(dir, ".disabled").exists()) continue;
             try {
@@ -247,6 +250,7 @@ final class Mods {
                 enabled.put(id, new java.util.LinkedHashMap<String, Object>());
             }
         }
+        DexCacheCleanup.reconcile(DEX_CACHE, installedIds);
         plan = hmgapi.engine.HookPlan.of(enabled, Points.map == null ? null : Points.map.points.keySet(), Points.map == null ? null : Points.map.missing);
         List<String> order = new ArrayList<String>(plan.order);
         for (String id : dirOf.keySet()) if (!order.contains(id)) order.add(id);   // disabled ones, for the list
@@ -434,6 +438,11 @@ final class Mods {
     }
 
     static void appLoaded(LoadedApp app) {
+        try {
+            if (app.context != null) DexCacheCleanup.reconcile(app.context.getDir("hmgapi-dex", 0), installedIds);
+        } catch (Exception ignored) {
+            // Stale optimized code is harmless; cleanup must not disrupt app startup.
+        }
         for (Loaded m : withHooks) {
             try {
                 m.entry.appLoaded(m.context, app);

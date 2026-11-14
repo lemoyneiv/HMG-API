@@ -194,9 +194,12 @@ run root service-start svc loop >/dev/null
 waitfor '[ "$(st loop)" = running ]' || true
 check "started again" running "$(st loop)"
 pid=$(run root services svc | awk '$2 == "loop" { print $4 }')
+has "public/services.txt lists running mod service pid" "$pid svc" "$(cat "$S/public/services.txt")"
+check "public/services.txt leaves out core hmgapi services" "" "$(grep ' hmgapi$' "$S/public/services.txt" || true)"
 grep -v '^svc loop ' "$S/state/services.txt" > "$S/state/s.tmp" && mv "$S/state/s.tmp" "$S/state/services.txt"
 waitfor '[ -z "$(st loop)" ]' || true
 check "mod turned off (line gone): service stopped and dropped" "" "$(st loop)"
+check "public/services.txt drops stopped service" "" "$(grep "^$pid svc$" "$S/public/services.txt" || true)"
 check "... its process ended" no "$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)"
 check "app may list services" 0 "$(code app services)"
 check "other may not" 13 "$(code other services)"
@@ -222,13 +225,16 @@ python3 - "hmgapi-vehicle-test-$$" "$T/vehicle.req" <<'PY' &
 import socket, sys
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.bind("\0" + sys.argv[1]); s.listen(4); s.settimeout(30)
+held = []
 for _ in range(6):
     try: c, _ = s.accept()
     except socket.timeout: break
     line = c.makefile().readline()
     open(sys.argv[2], "a").write(line)
     if line.startswith("do "): c.sendall(("ok %s\n" % line.strip()).encode()); c.close(); continue
-    c.sendall("".join("%s 42\n" % n for n in line.split()[1:]).encode()); c.close()
+    c.sendall("".join("%s 42\n" % n for n in line.split()[1:]).encode())
+    if "speed.held" in line: held.append(c); continue   # the car's service: its close never reached hmgapid (#145)
+    c.close()
 PY
 VP=$!
 sleep 0.5
@@ -238,6 +244,7 @@ check "vehicle: request passed on" "read speed gear.park" "$(head -1 "$T/vehicle
 check "vehicle: not declared refused" 13 "$(code mod vehicle hv.soc)"
 check "vehicle: bad name refused" 2 "$(code mod vehicle 'speed;x')"
 check "vehicle: root reads any" "hv.soc 42" "$(run root vehicle hv.soc)"
+check "vehicle: a whole answer with the connection left open is still ok (#145)" "0 speed.held 42" "$(set +e; o=$(run root vehicle speed.held); echo "$? $o")"
 check "vehicle: other app refused" 13 "$(code other vehicle speed)"
 printf 'demo charge_door\n' > "$T/mod/root/state/commands.txt"
 check "vehicle-do: a declared command passed on with the mod" "ok do demo charge_door open" "$(run mod vehicle-do charge_door open)"
@@ -263,7 +270,7 @@ check "allow: block_ambient_light on" on "$(run root allow block_ambient_light o
 run root allow block_ambient_light off >/dev/null
 check "allow: off again" no "$(run root allow startup_notice off >/dev/null; [ -f "$T/root/root/settings/allow/startup_notice" ] && echo yes || echo no)"
 kill $VP 2>/dev/null || true; wait $VP 2>/dev/null || true
-check "vehicle: nothing reached the service for refused asks" 4 "$(wc -l < "$T/vehicle.req" | tr -d ' ')"
+check "vehicle: nothing reached the service for refused asks" 5 "$(wc -l < "$T/vehicle.req" | tr -d ' ')"
 
 : > "$T/mod/root/state/apps.txt"
 check "mod turned off: its app is anyone again" 13 "$(code mod whoami)"
