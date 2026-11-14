@@ -28,6 +28,13 @@ setprop sys.boot_completed 0
 r=$(pm install -r "$A" 2>&1)
 setprop sys.boot_completed 1
 case "$r" in
+    *INCONSISTENT_CERTIFICATES*)
+        setprop sys.boot_completed 0
+        pm uninstall hmgapi.app >/dev/null 2>&1
+        r=$(pm install -r "$A" 2>&1)
+        setprop sys.boot_completed 1 ;;
+esac
+case "$r" in
     *Success*) rm -f "$A"; echo "installed the HMG-API app (Android is up now)" >> "$LOG" ;;
     *) echo "WARNING: the HMG-API app didn't install: $r (tried again at the next restart)" >> "$LOG" ;;
 esac

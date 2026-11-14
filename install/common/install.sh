@@ -222,6 +222,13 @@ if { [ -z "$ROOT" ] || [ "$HMGAPI_TEST_ANDROID" = 1 ]; } && [ "$(getprop sys.boo
     r=$(pm install -r "$P/HmgApi.apk" 2>&1)
     setprop sys.boot_completed 1
     case "$r" in
+        *INCONSISTENT_CERTIFICATES*)
+            setprop sys.boot_completed 0
+            pm uninstall hmgapi.app >/dev/null 2>&1
+            r=$(pm install -r "$P/HmgApi.apk" 2>&1)
+            setprop sys.boot_completed 1 ;;
+    esac
+    case "$r" in
         *Success*) rm -f "$D/public/HmgApi.apk"; log "installed the HMG-API app" ;;
         *)
             cp "$P/HmgApi.apk" "$D/public/HmgApi.apk" && chmod 644 "$D/public/HmgApi.apk"
