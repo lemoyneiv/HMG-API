@@ -759,7 +759,7 @@ public final class BleTest {
         // Write to write-without-response-only char fff3 even when withResponse=true
         ble.writeCharacteristic("AA:BB:CC:11:22:33", "fff3", new byte[] { 'A', 'T', 'Z', '\r' }, true);
         checkTrue("rtl8762: property-aware write falls back to Write Command (0x52) for props=0x04",
-                writeCmdLatch.await(2, TimeUnit.SECONDS));
+                writeCmdLatch.await(2, TimeUnit.SECONDS) && ctl.writeCmd41WireLatch.await(2, TimeUnit.SECONDS));
         check("rtl8762: Write Command payload delivered", "41545a0d", Ble.bytesToHex(ctl.lastWriteCmd41));
 
         ble.close();
@@ -999,6 +999,7 @@ public final class BleTest {
         final CountDownLatch smpFailLatch = new CountDownLatch(1);
         final CountDownLatch ltkNegReplyLatch = new CountDownLatch(1);
         final CountDownLatch localGattServerRspLatch = new CountDownLatch(1);
+        final CountDownLatch writeCmd41WireLatch = new CountDownLatch(1);
 
         final byte[] longReadData = new byte[220];
         volatile byte[] lastWrittenValue41;
@@ -1272,12 +1273,12 @@ public final class BleTest {
             if (opcode == BleCentral.HCI_DISCONNECT && params.length >= 3) {
                 int h = (params[0] & 0xFF) | ((params[1] & 0xFF) << 8);
                 emitCommandStatus(opcode, 0x00);
-                if (h == 0x0041) disconnectHandle41Latch.countDown();
                 emitEvent(new byte[] {
                     0x05, 0x04, 0x00,
                     (byte) (h & 0xFF), (byte) ((h >> 8) & 0xFF),
                     params[2]
                 });
+                if (h == 0x0041) disconnectHandle41Latch.countDown();
                 return;
             }
             emitCommandComplete(opcode, new byte[] { 0x00 });
@@ -1396,6 +1397,7 @@ public final class BleTest {
             } else if (op == 0x52 && pdu.length >= 3) {
                 if (start == 0x0017) {
                     lastWriteCmd41 = Arrays.copyOfRange(pdu, 3, pdu.length);
+                    writeCmd41WireLatch.countDown();
                 }
             }
         }
