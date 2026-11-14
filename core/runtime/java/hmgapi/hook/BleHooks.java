@@ -38,6 +38,7 @@ final class BleHooks {
     private static final String ACTION_BT_STATE_CHANGED = "android.bluetooth.adapter.action.STATE_CHANGED";
     private static final String EXTRA_BT_STATE = "android.bluetooth.adapter.extra.STATE";
     private static final int BT_STATE_OFF = 10;
+    private static final int BT_STATE_ON = 12;
     private static final int BT_STATE_TURNING_OFF = 13;
 
     private static volatile Context btContext;
@@ -92,6 +93,15 @@ final class BleHooks {
                             @Override
                             public void run() {
                                 c.onAdapterDown();
+                            }
+                        };
+                        t.setDaemon(true);
+                        t.start();
+                    } else if (state == BT_STATE_ON) {
+                        Thread t = new Thread("hmgapi-ble-btstate") {
+                            @Override
+                            public void run() {
+                                c.onAdapterOn();
                             }
                         };
                         t.setDaemon(true);
@@ -207,6 +217,10 @@ final class BleHooks {
         public synchronized boolean ensureReady(final Receiver receiver) throws IOException {
             if (isReady() && txOut != null) return true;
             if (ready) {
+                if (listening) {
+                    Bridge.bleStateNative(1, -1);
+                    if (isReady() && txOut != null) return true;
+                }
                 shutdown();
             }
             int lastRc = 0;

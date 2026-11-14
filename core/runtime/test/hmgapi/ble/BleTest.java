@@ -52,6 +52,9 @@ public final class BleTest {
         testBackpressureAndStalledClient();
         testAdapterDownAndRecovery();
         testSharedAclBuffersRefuseConnect();
+        testColdBootResetAndAddrTypeFallback();
+        testRealtekVeepeakGattSmpL2capAndPaddedAdv();
+        testDiscoveryFailureCleansUpZombieLink();
         System.exit(fail);
     }
 
@@ -606,6 +609,212 @@ public final class BleTest {
         sp.closeAll();
     }
 
+    // -------------------------------------------------------------------------
+    // 8. Cold-boot Bluedroid reset snooping, 0x0C healing, & addrType fallback
+    // -------------------------------------------------------------------------
+    private static void testColdBootResetAndAddrTypeFallback() throws Exception {
+        final FakeController ctl = new FakeController();
+        ctl.veepeakRequiresRandomAddr = true;
+        final BleCentral central = new BleCentral(ctl);
+
+        final CountDownLatch readyLatch = new CountDownLatch(1);
+        StreamPair sp = new StreamPair(16384);
+        startServerWorker(central, sp, "brake");
+        Ble ble = Ble.attach(sp.clientIn, sp.clientOut, sp.clientClose, new Ble.SimpleListener() {
+            @Override
+            public void onGattReady(String mac, int mtu) {
+                readyLatch.countDown();
+            }
+        });
+
+        // Simulate stock Bluedroid cold-boot HCI_Reset (0x0C03) + HCI_Set_Event_Mask wiping bit 61 & LE Host Support
+        ctl.leHostSupportEnabled.set(false);
+        ctl.lastEventMaskHex = "ffffffff07f8bf1d";
+        ctl.emitCommandComplete(BleCentral.HCI_RESET, new byte[] { 0x00 });
+        ctl.emitCommandComplete(BleCentral.HCI_SET_EVENT_MASK, new byte[] { 0x00 });
+
+        for (int i = 0; i < 60 && !ctl.leHostSupportEnabled.get(); i++) {
+            Thread.sleep(25);
+        }
+        check("cold-boot: unsolicited Bluedroid HCI_Reset/Set_Event_Mask triggers automatic LE restore",
+                Boolean.TRUE, Boolean.valueOf(ctl.leHostSupportEnabled.get()));
+        check("cold-boot: bit 61 (0x3E LE Meta Event) restored after Bluedroid reset",
+                "ffffffff07f8bf3d", ctl.lastEventMaskHex);
+
+        // Also test onAdapterOn() + 0x0C Command Disallowed healing + addrType 0 -> 1 fallback
+        ctl.leHostSupportEnabled.set(false);
+        central.onAdapterOn();
+        check("cold-boot: onAdapterOn() re-enables LE_Host_Support for active session",
+                Boolean.TRUE, Boolean.valueOf(ctl.leHostSupportEnabled.get()));
+
+        ctl.rejectNextCreateConnWith0C.set(true);
+        // Caller passes addrType=0 (Public), but Veepeak 66:1E:87:00:B2:9F requires addrType=1 (Random Static)
+        ble.connectDevice("66:1E:87:00:B2:9F", 0, "fff0");
+        checkTrue("fallback: connect succeeds after 0x0C heal + addrType 0 -> 1 fallback",
+                readyLatch.await(4, TimeUnit.SECONDS));
+        check("fallback: connected using peerAddrType=1", Integer.valueOf(1), Integer.valueOf(ctl.lastConnectedAddrType.get()));
+
+        ble.close();
+        for (int i = 0; i < 60 && ctl.listening.get(); i++) Thread.sleep(25);
+        sp.closeAll();
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. Realtek RTL8762 (VEEPEAK) Local GAP/GATT, SMP 0x0006, L2CAP lat=0, & padded ADV
+    // -------------------------------------------------------------------------
+    private static void testRealtekVeepeakGattSmpL2capAndPaddedAdv() throws Exception {
+        // 9a. Direct unit checks on stateless Local GAP/GATT Server & L2CAP parameter validator
+        byte[] grpRsp = BleGatt.buildLocalGattServerResponse(Ble.hexToBytes("100100ffff0028"));
+        check("local-gatt: 0x10 Primary Service discovery returns 0x1800 + 0x1801",
+                "1106010005000018060009000118", Ble.bytesToHex(grpRsp));
+        byte[] nameRsp = BleGatt.buildLocalGattServerResponse(Ble.hexToBytes("0801000500002a"));
+        check("local-gatt: 0x08 Read By Type 0x2A00 returns Gen5W",
+                "0907030047656e3557", Ble.bytesToHex(nameRsp));
+        byte[] ancsRsp = BleGatt.buildLocalGattServerResponse(
+                Ble.hexToBytes("060100ffff0028d0002d121e4b0fa4994eceb531f40579"));
+        check("local-gatt: 0x06 Find By Type Value for Apple ANCS returns ATT_ERROR_RSP 0x0A",
+                "010601000a", Ble.bytesToHex(ancsRsp));
+        check("local-gatt: Write Command (0x52) never elicits ATT response",
+                null, BleGatt.buildLocalGattServerResponse(Ble.hexToBytes("52030041545a0d")));
+        checkTrue("l2cap-val: Veepeak RTL8762 (min=16,max=32,lat=20,timeout=500) accepted",
+                BleGatt.shouldAcceptConnParamUpdate(16, 32, 20, 500));
+        checkTrue("l2cap-val: ultra-tight min=8 (<15ms) rejected for A2DP coexistence",
+                !BleGatt.shouldAcceptConnParamUpdate(8, 16, 0, 400));
+
+        // 9b. End-to-end zero-padded ADV_IND + SCAN_RSP merge, reverse GATT probe, SMP 0x0B, LTK 0x05, & lat=20->0 clamp
+        final FakeController ctl = new FakeController();
+        final BleCentral central = new BleCentral(ctl);
+        final CountDownLatch veepeakAdvLatch = new CountDownLatch(1);
+        final AtomicReference<Ble.AdvRecord> veepeakAdv = new AtomicReference<Ble.AdvRecord>();
+        final CountDownLatch readyLatch = new CountDownLatch(1);
+        final CountDownLatch writeCmdLatch = new CountDownLatch(1);
+
+        StreamPair sp = new StreamPair(16384);
+        startServerWorker(central, sp, "brake");
+        Ble ble = Ble.attach(sp.clientIn, sp.clientOut, sp.clientClose, new Ble.SimpleListener() {
+            @Override
+            public void onAdvertisement(Ble.AdvRecord record) {
+                if ("66:1E:87:00:B2:9F".equals(record.mac) && "VEEPEAK".equals(record.localName)) {
+                    veepeakAdv.set(record);
+                    veepeakAdvLatch.countDown();
+                }
+            }
+
+            @Override
+            public void onGattReady(String mac, int mtu) {
+                readyLatch.countDown();
+            }
+
+            @Override
+            public void onCharacteristicWrite(String mac, String charUuid) {
+                writeCmdLatch.countDown();
+            }
+        });
+
+        ble.startScan();
+        waitUntilScanState(ctl, true);
+        // 31-byte zero-padded ADV_IND + zero-padded SCAN_RSP ("VEEPEAK")
+        ctl.emitAdvReport(0x00, 0x00, "66:1E:87:00:B2:9F", -59,
+                Ble.hexToBytes("0201060303f0ff000000000000000000000000000000000000000000000000"));
+        ctl.emitAdvReport(0x04, 0x00, "66:1E:87:00:B2:9F", -58,
+                Ble.hexToBytes("08095645455045414b00000000000000000000000000000000000000000000"));
+        checkTrue("adv-pad: zero-padded ADV_IND + SCAN_RSP merged into VEEPEAK record",
+                veepeakAdvLatch.await(2, TimeUnit.SECONDS));
+        checkTrue("adv-pad: merged VEEPEAK record retains 0xFFF0 service UUID",
+                veepeakAdv.get().hasServiceUuid("fff0"));
+        ble.stopScan();
+
+        ble.connectDevice("AA:BB:CC:11:22:33", 0, "fff0");
+        checkTrue("rtl8762: connected to peripheral", readyLatch.await(3, TimeUnit.SECONDS));
+
+        // Peripheral sends SMP Security_Request (0x0B, authReq=0x01) on CID 0x0006
+        ctl.emitPeripheralPdu(0x0041, 0x0006, new byte[] { 0x0B, 0x01 });
+        checkTrue("rtl8762: SMP Security_Request answered with Pairing_Failed (0x05, 0x05)",
+                ctl.smpFailLatch.await(2, TimeUnit.SECONDS));
+        check("rtl8762: SMP reply bytes", "0505", Ble.bytesToHex(ctl.lastSmpPdu));
+
+        // Peripheral sends LE_Long_Term_Key_Request (0x3E subevent 0x05)
+        ctl.emitEvent(new byte[] {
+            0x3E, 0x0D, 0x05, 0x41, 0x00,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        });
+        checkTrue("rtl8762: LE_Long_Term_Key_Request answered with Negative_Reply (0x201B)",
+                ctl.ltkNegReplyLatch.await(2, TimeUnit.SECONDS));
+
+        // Peripheral sends reverse GATT Read_By_Group_Type_Req (0x10) on CID 0x0004
+        ctl.emitPeripheralPdu(0x0041, 0x0004, Ble.hexToBytes("100100ffff0028"));
+        checkTrue("rtl8762: reverse GATT query answered on CID 0x0004",
+                ctl.localGattServerRspLatch.await(2, TimeUnit.SECONDS));
+
+        // Peripheral sends Veepeak L2CAP 0x12 with latency=20 -> Central clamps effLatency=0
+        ctl.emitPeripheralPdu(0x0041, 0x0005, new byte[] {
+            0x12, 0x09, 0x08, 0x00,
+            0x10, 0x00, 0x20, 0x00, 0x14, 0x00, (byte) 0xF4, 0x01
+        });
+        checkTrue("rtl8762: Veepeak L2CAP 0x12 triggers HCI_LE_Connection_Update",
+                ctl.connUpdateLatch.await(2, TimeUnit.SECONDS));
+        check("rtl8762: slave latency=20 clamped to 0 in HCI_LE_Connection_Update",
+                Integer.valueOf(0), Integer.valueOf(ctl.lastConnUpdateLatency.get()));
+
+        // Write to write-without-response-only char fff3 even when withResponse=true
+        ble.writeCharacteristic("AA:BB:CC:11:22:33", "fff3", new byte[] { 'A', 'T', 'Z', '\r' }, true);
+        checkTrue("rtl8762: property-aware write falls back to Write Command (0x52) for props=0x04",
+                writeCmdLatch.await(2, TimeUnit.SECONDS));
+        check("rtl8762: Write Command payload delivered", "41545a0d", Ble.bytesToHex(ctl.lastWriteCmd41));
+
+        ble.close();
+        for (int i = 0; i < 60 && ctl.listening.get(); i++) Thread.sleep(25);
+        sp.closeAll();
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. GATT discovery failure disconnects link so no zombie link blocks retries
+    // -------------------------------------------------------------------------
+    private static void testDiscoveryFailureCleansUpZombieLink() throws Exception {
+        final FakeController ctl = new FakeController();
+        ctl.failDiscoveryReads.set(true);
+        final BleCentral central = new BleCentral(ctl);
+
+        final CountDownLatch discErrLatch = new CountDownLatch(1);
+        final AtomicReference<String> discErr = new AtomicReference<String>();
+        final CountDownLatch retryReadyLatch = new CountDownLatch(1);
+
+        StreamPair sp = new StreamPair(16384);
+        startServerWorker(central, sp, "brake");
+        Ble ble = Ble.attach(sp.clientIn, sp.clientOut, sp.clientClose, new Ble.SimpleListener() {
+            @Override
+            public void onError(String mac, String error) {
+                if (error != null && error.startsWith("GATT_DISCOVERY_FAILED")) {
+                    discErr.set(error);
+                    discErrLatch.countDown();
+                }
+            }
+
+            @Override
+            public void onGattReady(String mac, int mtu) {
+                retryReadyLatch.countDown();
+            }
+        });
+
+        ble.connectDevice("AA:BB:CC:11:22:33", 0, "fff0");
+        checkTrue("zombie-fix: GATT_DISCOVERY_FAILED reported on broken discovery",
+                discErrLatch.await(10, TimeUnit.SECONDS));
+        checkTrue("zombie-fix: broken link disconnected immediately via HCI_Disconnect",
+                ctl.disconnectHandle41Latch.await(2, TimeUnit.SECONDS));
+        checkTrue("zombie-fix: zero zombie links remain in central status",
+                central.buildStatusSummary().contains("active_links=0"));
+
+        // Now restore peripheral GATT responses and reconnect on the same session!
+        ctl.failDiscoveryReads.set(false);
+        ble.connectDevice("AA:BB:CC:11:22:33", 0, "fff0");
+        checkTrue("zombie-fix: subsequent CONNECT performs full GATT discovery and reaches READY",
+                retryReadyLatch.await(3, TimeUnit.SECONDS));
+
+        ble.close();
+        for (int i = 0; i < 60 && ctl.listening.get(); i++) Thread.sleep(25);
+        sp.closeAll();
+    }
+
     private static void waitUntilScanState(FakeController ctl, boolean want) throws InterruptedException {
         for (int i = 0; i < 40 && ctl.scanCurrentlyEnabled.get() != want; i++) {
             Thread.sleep(25);
@@ -767,24 +976,34 @@ public final class BleTest {
         volatile Receiver receiver;
         volatile boolean sharedAclBuffers = false;
         volatile boolean bt40Only = false;
+        volatile boolean veepeakRequiresRandomAddr = false;
         volatile String lastEventMaskHex = "";
         volatile String lastLeEventMaskHex = "";
         final AtomicBoolean ready = new AtomicBoolean(false);
         final AtomicBoolean listening = new AtomicBoolean(false);
         final AtomicBoolean leHostSupportEnabled = new AtomicBoolean(false);
         final AtomicBoolean leEventMaskCleared = new AtomicBoolean(false);
+        final AtomicBoolean rejectNextCreateConnWith0C = new AtomicBoolean(false);
+        final AtomicBoolean failDiscoveryReads = new AtomicBoolean(false);
         final AtomicInteger initCount = new AtomicInteger(0);
         final AtomicInteger shutdownCount = new AtomicInteger(0);
         final AtomicInteger createConnCount = new AtomicInteger(0);
+        final AtomicInteger lastConnectedAddrType = new AtomicInteger(-1);
+        final AtomicInteger lastConnUpdateLatency = new AtomicInteger(-1);
         final AtomicInteger scanEnableCount = new AtomicInteger(0);
         final AtomicBoolean scanCurrentlyEnabled = new AtomicBoolean(false);
         final Set<Integer> trackedHandles = Collections.synchronizedSet(new HashSet<Integer>());
         final AtomicInteger aclFragmentsSeenForHandle41 = new AtomicInteger(0);
         final CountDownLatch connUpdateLatch = new CountDownLatch(1);
         final CountDownLatch disconnectHandle41Latch = new CountDownLatch(1);
+        final CountDownLatch smpFailLatch = new CountDownLatch(1);
+        final CountDownLatch ltkNegReplyLatch = new CountDownLatch(1);
+        final CountDownLatch localGattServerRspLatch = new CountDownLatch(1);
 
         final byte[] longReadData = new byte[220];
         volatile byte[] lastWrittenValue41;
+        volatile byte[] lastWriteCmd41;
+        volatile byte[] lastSmpPdu;
         private final Map<Integer, ByteArrayOutputStream> txReassembly = new HashMap<Integer, ByteArrayOutputStream>();
         private final Map<Integer, Integer> txExpectedLen = new HashMap<Integer, Integer>();
         private final Map<Integer, Integer> txCid = new HashMap<Integer, Integer>();
@@ -938,6 +1157,10 @@ public final class BleTest {
             emitL2capToCentral(connHandle, 0x0005, sig, 27);
         }
 
+        void emitPeripheralPdu(int connHandle, int cid, byte[] pdu) {
+            emitL2capToCentral(connHandle, cid, pdu, 27);
+        }
+
         private void emitL2capToCentral(int connHandle, int cid, byte[] pdu, int maxAclLen) {
             byte[] l2cap = new byte[4 + pdu.length];
             l2cap[0] = (byte) (pdu.length & 0xFF);
@@ -1003,15 +1226,25 @@ public final class BleTest {
             }
             if (opcode == BleCentral.HCI_LE_CREATE_CONN && params.length >= 12) {
                 createConnCount.incrementAndGet();
+                if (rejectNextCreateConnWith0C.compareAndSet(true, false)) {
+                    emitCommandStatus(opcode, 0x0C);
+                    return;
+                }
                 emitCommandStatus(opcode, 0x00);
                 int addrType = params[5] & 0xFF;
                 byte[] peerLe = Arrays.copyOfRange(params, 6, 12);
-                int handle = (peerLe[5] == (byte) 0xAA) ? 0x0041 : 0x0042;
+                int handle = (peerLe[5] == (byte) 0xAA || peerLe[5] == (byte) 0x66) ? 0x0041 : 0x0042;
+                int connStatus = 0x00;
+                if (veepeakRequiresRandomAddr && peerLe[5] == (byte) 0x66 && addrType == 0) {
+                    connStatus = 0x02;
+                } else {
+                    lastConnectedAddrType.set(addrType);
+                }
                 byte[] connEvt = new byte[21];
                 connEvt[0] = 0x3E;
                 connEvt[1] = 19;
                 connEvt[2] = 0x01;
-                connEvt[3] = 0x00;
+                connEvt[3] = (byte) connStatus;
                 connEvt[4] = (byte) (handle & 0xFF);
                 connEvt[5] = (byte) ((handle >> 8) & 0xFF);
                 connEvt[6] = 0x00;
@@ -1024,8 +1257,16 @@ public final class BleTest {
                 return;
             }
             if (opcode == BleCentral.HCI_LE_CONN_UPDATE) {
+                if (params.length >= 8) {
+                    lastConnUpdateLatency.set((params[6] & 0xFF) | ((params[7] & 0xFF) << 8));
+                }
                 emitCommandStatus(opcode, 0x00);
                 connUpdateLatch.countDown();
+                return;
+            }
+            if (opcode == BleCentral.HCI_LE_LTK_REQ_NEG_REPLY && params.length >= 2) {
+                emitCommandComplete(opcode, new byte[] { 0x00, params[0], params[1] });
+                ltkNegReplyLatch.countDown();
                 return;
             }
             if (opcode == BleCentral.HCI_DISCONNECT && params.length >= 3) {
@@ -1072,8 +1313,20 @@ public final class BleTest {
         }
 
         private void handlePeripheralL2cap(int connHandle, int cid, byte[] pdu) {
+            if (cid == 0x0006) {
+                lastSmpPdu = pdu;
+                if (pdu.length >= 2 && (pdu[0] & 0xFF) == 0x05) {
+                    smpFailLatch.countDown();
+                }
+                return;
+            }
             if (cid != 0x0004 || pdu.length < 1) return;
             int op = pdu[0] & 0xFF;
+
+            if (op == 0x11 || op == 0x09 || op == 0x01) {
+                localGattServerRspLatch.countDown();
+                return;
+            }
 
             if (op == 0x02) {
                 emitL2capToCentral(connHandle, 0x0004, new byte[] { 0x03, (byte) 185, 0x00 }, 27);
@@ -1090,10 +1343,11 @@ public final class BleTest {
         private void handlePeripheral41Att(int op, byte[] pdu) {
             int start = pdu.length >= 3 ? ((pdu[1] & 0xFF) | ((pdu[2] & 0xFF) << 8)) : 0;
             if (op == 0x10) {
+                if (failDiscoveryReads.get()) return;
                 if (start <= 0x0010) {
                     emitL2capToCentral(0x0041, 0x0004, new byte[] {
                         0x11, 0x06,
-                        0x10, 0x00, 0x15, 0x00, (byte) 0xF0, (byte) 0xFF
+                        0x10, 0x00, 0x17, 0x00, (byte) 0xF0, (byte) 0xFF
                     }, 27);
                 } else {
                     emitAttError(0x0041, op, start, 0x0A);
@@ -1104,6 +1358,11 @@ public final class BleTest {
                         0x09, 0x07,
                         0x11, 0x00, 0x12, 0x12, 0x00, (byte) 0xF1, (byte) 0xFF,
                         0x14, 0x00, 0x0C, 0x15, 0x00, (byte) 0xF2, (byte) 0xFF
+                    }, 27);
+                } else if (start <= 0x0016) {
+                    emitL2capToCentral(0x0041, 0x0004, new byte[] {
+                        0x09, 0x07,
+                        0x16, 0x00, 0x04, 0x17, 0x00, (byte) 0xF3, (byte) 0xFF
                     }, 27);
                 } else {
                     emitAttError(0x0041, op, start, 0x0A);
@@ -1134,6 +1393,10 @@ public final class BleTest {
                     lastWrittenValue41 = Arrays.copyOfRange(pdu, 3, pdu.length);
                 }
                 emitL2capToCentral(0x0041, 0x0004, new byte[] { 0x13 }, 27);
+            } else if (op == 0x52 && pdu.length >= 3) {
+                if (start == 0x0017) {
+                    lastWriteCmd41 = Arrays.copyOfRange(pdu, 3, pdu.length);
+                }
             }
         }
 

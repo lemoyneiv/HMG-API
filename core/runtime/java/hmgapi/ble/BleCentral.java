@@ -2,6 +2,7 @@ package hmgapi.ble;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,6 +51,7 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
 
     public static final int HCI_DISCONNECT            = 0x0406;
     public static final int HCI_SET_EVENT_MASK        = 0x0C01;
+    public static final int HCI_RESET                 = 0x0C03;
     public static final int HCI_WRITE_LE_HOST_SUPPORT = 0x0C6D;
     public static final int HCI_LE_SET_EVENT_MASK     = 0x2001;
     public static final int HCI_LE_READ_BUFFER_SIZE   = 0x2002;
@@ -58,6 +60,7 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
     public static final int HCI_LE_CREATE_CONN        = 0x200D;
     public static final int HCI_LE_CREATE_CONN_CANCEL = 0x200E;
     public static final int HCI_LE_CONN_UPDATE        = 0x2013;
+    public static final int HCI_LE_LTK_REQ_NEG_REPLY  = 0x201B;
 
     private static final int MAX_CONCURRENT_CONNECTIONS = 4;
     private static final long ADV_MERGE_TTL_MS = 2500L;
@@ -95,6 +98,8 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
     private volatile CountDownLatch pendingConnectLatch = null;
     private volatile int pendingConnectResultHandle = -1;
     private volatile int pendingConnectStatus = -1;
+    private volatile int lastConnectRejectStatus = 0;
+    private final AtomicInteger rxLeMetaEvents = new AtomicInteger(0);
 
     private final Map<String, BleGatt.Link> linksByMac = new ConcurrentHashMap<String, BleGatt.Link>();
     private final Map<Integer, BleGatt.Link> linksByHandle = new ConcurrentHashMap<Integer, BleGatt.Link>();
@@ -183,6 +188,47 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         }
 
         transport.shutdown();
+    }
+
+    /**
+     * Invoked when the Bluetooth adapter finishes turning on (e.g. cold boot after patchram
+     * and {@code BTM_DeviceReset}). Marks controller LE state dirty and re-initializes LE
+     * masks/scanning if any BLE session is already open.
+     */
+    public void onAdapterOn() {
+        info("Bluetooth adapter on; refreshing LE controller state");
+        boolean needRestore;
+        synchronized (stateLock) {
+            leStackInitialized = false;
+            hardwareScanEnabled = false;
+            pausedScanForConnect = false;
+            needRestore = !activeSessions.isEmpty() || !scanSubscribers.isEmpty();
+        }
+        if (needRestore) {
+            refreshLeAfterExternalReset();
+        }
+    }
+
+    private void refreshLeAfterExternalReset() {
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException ignored) {}
+        if (activeSessions.isEmpty() && scanSubscribers.isEmpty()) return;
+        try {
+            if (ensureNativeAndLeReady(null)) {
+                synchronized (stateLock) {
+                    if (!scanSubscribers.isEmpty() && !hardwareScanEnabled && !pausedScanForConnect) {
+                        try {
+                            setHardwareScan(true);
+                        } catch (IOException e) {
+                            warn("failed restoring scan after reset: " + e.getMessage());
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            warn("failed refreshing LE controller masks: " + e.getMessage());
+        }
     }
 
     /** Tears down every active BLE session and restores controller settings. */
@@ -389,6 +435,9 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
 
     private boolean ensureNativeAndLeReady(BleSession session) throws IOException {
         synchronized (stateLock) {
+            if (leStackInitialized) {
+                transport.setListening(true);
+            }
             if (!transport.isReady()) {
                 leStackInitialized = false;
                 hardwareScanEnabled = false;
@@ -399,8 +448,24 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
             }
             transport.setListening(true);
             if (!leStackInitialized) {
-                initControllerLeStack(session);
-                leStackInitialized = true;
+                IOException lastErr = null;
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        initControllerLeStack(session);
+                        leStackInitialized = true;
+                        lastErr = null;
+                        break;
+                    } catch (IOException e) {
+                        lastErr = e;
+                        warn("controller LE init attempt " + (attempt + 1) + " failed: " + e.getMessage());
+                        if (attempt < 2) {
+                            try { Thread.sleep(250); } catch (InterruptedException ignored) { break; }
+                        }
+                    }
+                }
+                if (lastErr != null) {
+                    return false;
+                }
             }
             return true;
         }
@@ -415,10 +480,16 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
             (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
             (byte) 0x07, (byte) 0xF8, (byte) 0xBF, (byte) 0x3D
         };
-        sendHciCommandSync(HCI_SET_EVENT_MASK, evtMask, 2000);
+        byte[] evtRsp = sendHciCommandSync(HCI_SET_EVENT_MASK, evtMask, 2000);
+        if (evtRsp == null || evtRsp.length < 1 || evtRsp[0] != 0x00) {
+            throw new IOException("HCI_Set_Event_Mask failed");
+        }
 
         // 2. HCI_Write_LE_Host_Support(LE_Supported_Host=1, Simultaneous_LE_Host=1)
-        sendHciCommandSync(HCI_WRITE_LE_HOST_SUPPORT, new byte[] { 0x01, 0x01 }, 2000);
+        byte[] hostRsp = sendHciCommandSync(HCI_WRITE_LE_HOST_SUPPORT, new byte[] { 0x01, 0x01 }, 2000);
+        if (hostRsp == null || hostRsp.length < 1 || hostRsp[0] != 0x00) {
+            throw new IOException("HCI_Write_LE_Host_Support failed");
+        }
 
         // 3. HCI_LE_Set_Event_Mask: try BT 4.2 mask (subevents 0x01..0x07 + 0x0A) first,
         //    falling back to BT 4.0 baseline (subevents 0x01..0x05) if rejected by controller.
@@ -426,23 +497,25 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         byte[] maskRsp = sendHciCommandSync(HCI_LE_SET_EVENT_MASK, leMask42, 2000);
         if (maskRsp == null || maskRsp.length == 0 || maskRsp[0] != 0x00) {
             byte[] leMask40 = new byte[] { 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-            sendHciCommandSync(HCI_LE_SET_EVENT_MASK, leMask40, 2000);
+            maskRsp = sendHciCommandSync(HCI_LE_SET_EVENT_MASK, leMask40, 2000);
+            if (maskRsp == null || maskRsp.length < 1 || maskRsp[0] != 0x00) {
+                throw new IOException("HCI_LE_Set_Event_Mask failed");
+            }
         }
 
         // 4. HCI_LE_Read_Buffer_Size (0x2002): require dedicated LE ACL buffers for GATT connections
         byte[] bufRsp = sendHciCommandSync(HCI_LE_READ_BUFFER_SIZE, new byte[0], 2000);
-        if (bufRsp != null && bufRsp.length >= 4 && bufRsp[0] == 0x00) {
-            int pktLen = (bufRsp[1] & 0xFF) | ((bufRsp[2] & 0xFF) << 8);
-            int totalPkts = bufRsp[3] & 0xFF;
-            if (pktLen >= 27 && totalPkts >= 1) {
-                gatt.configureLeBuffers(pktLen, totalPkts);
-                info("controller LE buffer: aclMtu=" + pktLen + " credits=" + totalPkts);
-            } else {
-                warn("controller reports shared LE/Classic ACL buffers (pktLen=" + pktLen
-                        + " credits=" + totalPkts + "); scan-only mode");
-            }
+        if (bufRsp == null || bufRsp.length < 4 || bufRsp[0] != 0x00) {
+            throw new IOException("HCI_LE_Read_Buffer_Size failed");
+        }
+        int pktLen = (bufRsp[1] & 0xFF) | ((bufRsp[2] & 0xFF) << 8);
+        int totalPkts = bufRsp[3] & 0xFF;
+        if (pktLen >= 27 && totalPkts >= 1) {
+            gatt.configureLeBuffers(pktLen, totalPkts);
+            info("controller LE buffer: aclMtu=" + pktLen + " credits=" + totalPkts);
         } else {
-            warn("HCI_LE_Read_Buffer_Size unavailable; scan-only mode");
+            warn("controller reports shared LE/Classic ACL buffers (pktLen=" + pktLen
+                    + " credits=" + totalPkts + "); scan-only mode");
         }
         if (session != null) {
             info("LE central stack initialized for session #" + session.id);
@@ -726,6 +799,15 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
     }
 
     private void addScanSubscriber(BleSession session) {
+        try {
+            if (!ensureNativeAndLeReady(session)) {
+                session.sendLine("ERR SCAN_START_FAILED native_bridge_unavailable");
+                return;
+            }
+        } catch (IOException e) {
+            session.sendLine("ERR SCAN_START_FAILED " + BleGatt.sanitizeToken(e.getMessage()));
+            return;
+        }
         synchronized (stateLock) {
             scanSubscribers.add(session);
             if (!hardwareScanEnabled && !pausedScanForConnect) {
@@ -764,8 +846,15 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
                 0x00,
                 0x00
             };
-            sendHciCommandSync(HCI_LE_SET_SCAN_PARAMS, scanParams, 1500);
-            sendHciCommandSync(HCI_LE_SET_SCAN_ENABLE, new byte[] { 0x01, 0x00 }, 1500);
+            byte[] paramRsp = sendHciCommandSync(HCI_LE_SET_SCAN_PARAMS, scanParams, 1500);
+            if (paramRsp != null && paramRsp.length >= 1 && (paramRsp[0] & 0xFF) == 0x0C) {
+                sendHciCommandSync(HCI_LE_SET_SCAN_ENABLE, new byte[] { 0x00, 0x00 }, 1500);
+                sendHciCommandSync(HCI_LE_SET_SCAN_PARAMS, scanParams, 1500);
+            }
+            byte[] enRsp = sendHciCommandSync(HCI_LE_SET_SCAN_ENABLE, new byte[] { 0x01, 0x00 }, 1500);
+            if (enRsp != null && enRsp.length >= 1 && enRsp[0] != 0x00 && (enRsp[0] & 0xFF) != 0x0C) {
+                throw new IOException(String.format(Locale.US, "LE_Set_Scan_Enable_0x%02x", enRsp[0] & 0xFF));
+            }
             hardwareScanEnabled = true;
         } else {
             sendHciCommandSync(HCI_LE_SET_SCAN_ENABLE, new byte[] { 0x00, 0x00 }, 1500);
@@ -774,17 +863,33 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
     }
 
     private void performConnectAndDiscover(BleSession session, String mac, int requestedAddrType, String svcFilter) {
-        if (!gatt.hasDedicatedLeBuffers()) {
-            session.sendDeviceEvent(mac, "ERR SHARED_ACL_BUFFERS_UNSUPPORTED");
+        BleGatt.Link existing = linksByMac.get(mac);
+        if (existing != null && existing.connected && existing.gattReady) {
+            attachSessionToExistingLink(session, existing);
+            return;
+        }
+
+        try {
+            if (!ensureNativeAndLeReady(session)) {
+                session.sendDeviceEvent(mac, "ERR NATIVE_BRIDGE_UNAVAILABLE");
+                if (!session.multiConnMode) {
+                    session.sendLine("STATE DISCONNECTED");
+                }
+                return;
+            }
+        } catch (IOException e) {
+            session.sendDeviceEvent(mac, "ERR CONNECT_EXCEPTION " + BleGatt.sanitizeToken(e.getMessage()));
             if (!session.multiConnMode) {
                 session.sendLine("STATE DISCONNECTED");
             }
             return;
         }
 
-        BleGatt.Link existing = linksByMac.get(mac);
-        if (existing != null && existing.connected) {
-            attachSessionToExistingLink(session, existing);
+        if (!gatt.hasDedicatedLeBuffers()) {
+            session.sendDeviceEvent(mac, "ERR SHARED_ACL_BUFFERS_UNSUPPORTED");
+            if (!session.multiConnMode) {
+                session.sendLine("STATE DISCONNECTED");
+            }
             return;
         }
 
@@ -794,14 +899,36 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         }
 
         BleGatt.Link createdLink = null;
+        int rejectCode = 0;
         synchronized (connectInitLock) {
             existing = linksByMac.get(mac);
-            if (existing != null && existing.connected) {
-                attachSessionToExistingLink(session, existing);
+            if (existing != null) {
+                if (existing.connected && existing.gattReady) {
+                    attachSessionToExistingLink(session, existing);
+                    return;
+                }
+                disconnectLinkInternal(existing, "stale incomplete link");
+            }
+            try {
+                if (!ensureNativeAndLeReady(session)) {
+                    session.sendDeviceEvent(mac, "ERR NATIVE_BRIDGE_UNAVAILABLE");
+                    if (!session.multiConnMode) {
+                        session.sendLine("STATE DISCONNECTED");
+                    }
+                    return;
+                }
+            } catch (IOException e) {
+                session.sendDeviceEvent(mac, "ERR CONNECT_EXCEPTION " + BleGatt.sanitizeToken(e.getMessage()));
+                if (!session.multiConnMode) {
+                    session.sendLine("STATE DISCONNECTED");
+                }
                 return;
             }
             if (!gatt.hasDedicatedLeBuffers()) {
                 session.sendDeviceEvent(mac, "ERR SHARED_ACL_BUFFERS_UNSUPPORTED");
+                if (!session.multiConnMode) {
+                    session.sendLine("STATE DISCONNECTED");
+                }
                 return;
             }
 
@@ -814,22 +941,31 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
                 }
             }
 
+            int metaBefore = rxLeMetaEvents.get();
+            lastConnectRejectStatus = 0;
             try {
-                boolean hadCachedType = seenAddrTypes.containsKey(mac);
-                int firstType = requestedAddrType >= 0
+                Integer cachedType = seenAddrTypes.get(mac);
+                int firstType = (requestedAddrType == 0 || requestedAddrType == 1)
                         ? requestedAddrType
-                        : (hadCachedType ? seenAddrTypes.get(mac).intValue() : 0x00);
+                        : (cachedType != null ? (cachedType.intValue() & 0x01) : 0x00);
+                int fallbackType = (firstType == 0x00) ? 0x01 : 0x00;
 
                 session.sendDeviceEvent(mac, "CONN_STATE CONNECTING " + mac);
                 if (!session.multiConnMode) {
                     session.sendLine("STATE CONNECTING " + mac);
                 }
 
-                createdLink = attemptHciLeConnectOnce(mac, firstType, 10000);
-                if (createdLink == null && requestedAddrType < 0 && !hadCachedType && !session.closed.get() && leStackInitialized) {
-                    int fallbackType = (firstType == 0x00) ? 0x01 : 0x00;
+                createdLink = attemptHciLeConnectOnce(session, mac, firstType, 5500);
+                if (createdLink == null
+                        && lastConnectRejectStatus != 0x0B
+                        && !session.closed.get()
+                        && transport.isReady()) {
                     info("retrying LE connect to " + mac + " with addrType=" + fallbackType);
-                    createdLink = attemptHciLeConnectOnce(mac, fallbackType, 8000);
+                    createdLink = attemptHciLeConnectOnce(session, mac, fallbackType, 4500);
+                }
+                rejectCode = lastConnectRejectStatus;
+                if (createdLink == null && rxLeMetaEvents.get() == metaBefore) {
+                    leStackInitialized = false;
                 }
             } catch (Exception e) {
                 session.sendDeviceEvent(mac, "ERR CONNECT_EXCEPTION " + BleGatt.sanitizeToken(e.getMessage()));
@@ -847,7 +983,11 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
 
         if (createdLink == null) {
             if (!session.closed.get()) {
-                session.sendDeviceEvent(mac, "ERR CONNECT_TIMEOUT " + mac);
+                if (rejectCode == 0x0B) {
+                    session.sendDeviceEvent(mac, "ERR CONNECT_ALREADY_EXISTS " + mac);
+                } else {
+                    session.sendDeviceEvent(mac, "ERR CONNECT_TIMEOUT " + mac);
+                }
                 if (!session.multiConnMode) {
                     session.sendLine("STATE DISCONNECTED");
                 }
@@ -865,6 +1005,8 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         }
 
         try {
+            try { Thread.sleep(120); } catch (InterruptedException ignored) {}
+            if (!createdLink.connected) return;
             gatt.discoverGattHierarchy(createdLink, svcFilter);
             if (!createdLink.connected) return;
             createdLink.gattReady = true;
@@ -872,6 +1014,7 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         } catch (Exception e) {
             warn("GATT discovery failed on " + mac + ": " + e);
             session.sendDeviceEvent(mac, "ERR GATT_DISCOVERY_FAILED " + BleGatt.sanitizeToken(e.getMessage()));
+            disconnectLinkInternal(createdLink, "gatt discovery failed");
         }
     }
 
@@ -887,22 +1030,16 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         }
     }
 
-    private BleGatt.Link attemptHciLeConnectOnce(String mac, int addrType, long timeoutMs) throws IOException {
+    private BleGatt.Link attemptHciLeConnectOnce(BleSession session, String mac, int addrType, long timeoutMs) throws IOException {
         byte[] macLe = BleGatt.macToLittleEndianBytes(mac);
         if (macLe == null) throw new IOException("bad MAC " + mac);
-
-        CountDownLatch latch = new CountDownLatch(1);
-        pendingConnectMac = mac;
-        pendingConnectResultHandle = -1;
-        pendingConnectStatus = -1;
-        pendingConnectLatch = latch;
 
         // Interval=0x0060 (60 ms), Window=0x0030 (30 ms), Conn_Interval=15..30 ms (0x000C..0x0018), Timeout=4.0 s (0x0190)
         byte[] params = new byte[25];
         params[0] = 0x60; params[1] = 0x00;
         params[2] = 0x30; params[3] = 0x00;
         params[4] = 0x00;
-        params[5] = (byte) (addrType & 0xFF);
+        params[5] = (byte) (addrType & 0x01);
         System.arraycopy(macLe, 0, params, 6, 6);
         params[12] = 0x00;
         params[13] = 0x0C; params[14] = 0x00;
@@ -912,9 +1049,35 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         params[21] = 0x00; params[22] = 0x00;
         params[23] = 0x00; params[24] = 0x00;
 
+        CountDownLatch latch = new CountDownLatch(1);
+        pendingConnectMac = mac;
+        pendingConnectResultHandle = -1;
+        pendingConnectStatus = -1;
+        pendingConnectLatch = latch;
+
         byte[] cmdStatus = sendHciCommandSync(HCI_LE_CREATE_CONN, params, 2000);
-        if (cmdStatus != null && cmdStatus.length >= 1 && cmdStatus[0] != 0x00) {
-            int err = cmdStatus[0] & 0xFF;
+        if (cmdStatus != null && cmdStatus.length >= 1 && (cmdStatus[0] & 0xFF) == 0x0C) {
+            // 0x0C Command Disallowed: cancel stale create-conn, ensure scan disabled, re-assert LE Host Support, and retry once
+            warn("HCI_LE_Create_Connection returned 0x0C (Command Disallowed); healing controller LE state");
+            sendHciCommandSync(HCI_LE_CREATE_CONN_CANCEL, new byte[0], 1000);
+            sendHciCommandSync(HCI_LE_SET_SCAN_ENABLE, new byte[] { 0x00, 0x00 }, 1000);
+            synchronized (stateLock) {
+                leStackInitialized = false;
+            }
+            ensureNativeAndLeReady(session);
+            try { Thread.sleep(80); } catch (InterruptedException ignored) {}
+
+            latch = new CountDownLatch(1);
+            pendingConnectMac = mac;
+            pendingConnectResultHandle = -1;
+            pendingConnectStatus = -1;
+            pendingConnectLatch = latch;
+            cmdStatus = sendHciCommandSync(HCI_LE_CREATE_CONN, params, 2000);
+        }
+
+        if (cmdStatus == null || cmdStatus.length < 1 || cmdStatus[0] != 0x00) {
+            int err = (cmdStatus != null && cmdStatus.length >= 1) ? (cmdStatus[0] & 0xFF) : 0xFF;
+            lastConnectRejectStatus = err;
             warn(String.format(Locale.US, "HCI_LE_Create_Connection rejected status=0x%02x", err));
             pendingConnectLatch = null;
             return null;
@@ -924,12 +1087,18 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         try {
             completed = latch.await(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException ignored) {}
+
+        if (!completed && transport.isReady()) {
+            sendHciCommandSync(HCI_LE_CREATE_CONN_CANCEL, new byte[0], 1500);
+            try {
+                completed = latch.await(250, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException ignored) {}
+        }
         pendingConnectLatch = null;
 
         if (!completed || pendingConnectStatus != 0x00 || pendingConnectResultHandle <= 0) {
-            if (!completed && leStackInitialized && transport.isReady()) {
-                sendHciCommandSync(HCI_LE_CREATE_CONN_CANCEL, new byte[0], 1500);
-                try { Thread.sleep(80); } catch (InterruptedException ignored) {}
+            if (completed && pendingConnectStatus > 0) {
+                lastConnectRejectStatus = pendingConnectStatus;
             }
             return null;
         }
@@ -1043,6 +1212,29 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
             if (opcode == waitingCmdOpcode && latch != null) {
                 waitingCmdResult = Arrays.copyOfRange(evt, 5, evt.length);
                 latch.countDown();
+                return;
+            }
+            if (opcode == HCI_RESET
+                    || opcode == HCI_SET_EVENT_MASK
+                    || opcode == HCI_WRITE_LE_HOST_SUPPORT
+                    || opcode == HCI_LE_SET_EVENT_MASK) {
+                if (opcode == HCI_RESET) {
+                    hardwareScanEnabled = false;
+                    pausedScanForConnect = false;
+                }
+                if (leStackInitialized) {
+                    info(String.format(Locale.US,
+                            "stock Bluedroid issued opcode 0x%04x; scheduling LE mask refresh", opcode));
+                    leStackInitialized = false;
+                    if (!activeSessions.isEmpty() || !scanSubscribers.isEmpty()) {
+                        idleExecutor.execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                refreshLeAfterExternalReset();
+                            }
+                        });
+                    }
+                }
             }
             return;
         }
@@ -1084,6 +1276,7 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         }
 
         if (evtCode == 0x3E && evt.length >= 3) {
+            rxLeMetaEvents.incrementAndGet();
             int subEvt = evt[2] & 0xFF;
             if (subEvt == 0x01 && evt.length >= 19) {
                 int status = evt[3] & 0xFF;
@@ -1099,6 +1292,20 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
                 handleLeConnectionComplete(status, connH, peerAddrType, peerMac);
             } else if (subEvt == 0x02 && evt.length >= 4) {
                 parseAndBroadcastAdvReports(evt);
+            } else if (subEvt == 0x05 && evt.length >= 13) {
+                final byte hLo = evt[3];
+                final byte hHi = (byte) (evt[4] & 0x0F);
+                int h = ((hHi & 0xFF) << 8) | (hLo & 0xFF);
+                if (linksByHandle.containsKey(Integer.valueOf(h))) {
+                    idleExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                sendHciCommandSync(HCI_LE_LTK_REQ_NEG_REPLY, new byte[] { hLo, hHi }, 1000);
+                            } catch (IOException ignored) {}
+                        }
+                    });
+                }
             }
         }
     }
@@ -1107,6 +1314,9 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         if (status == 0x00 && connHandle > 0) {
             String effectiveMac = (pendingConnectMac != null && peerMac.equalsIgnoreCase(pendingConnectMac))
                     ? pendingConnectMac : peerMac;
+            if (peerAddrType == 0x00 || peerAddrType == 0x01) {
+                seenAddrTypes.put(effectiveMac, Integer.valueOf(peerAddrType));
+            }
             registerConnectedLink(effectiveMac, peerAddrType, connHandle);
         }
 
@@ -1146,6 +1356,23 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
         reconcileListeningState();
     }
 
+    static byte[] trimAdStructures(byte[] ad) {
+        if (ad == null || ad.length == 0) return new byte[0];
+        ByteArrayOutputStream out = new ByteArrayOutputStream(ad.length);
+        int pos = 0;
+        while (pos < ad.length) {
+            int len = ad[pos] & 0xFF;
+            if (len == 0) {
+                pos++;
+                continue;
+            }
+            if (pos + 1 + len > ad.length) break;
+            out.write(ad, pos, 1 + len);
+            pos += 1 + len;
+        }
+        return out.toByteArray();
+    }
+
     private void parseAndBroadcastAdvReports(byte[] evt) {
         int numReports = evt[3] & 0xFF;
         int pos = 4;
@@ -1160,7 +1387,7 @@ public final class BleCentral implements BleTransport.Receiver, BleGatt.HciComma
             pos += 9;
             if (pos + dataLen + 1 > evt.length) break;
 
-            byte[] adData = Arrays.copyOfRange(evt, pos, pos + dataLen);
+            byte[] adData = trimAdStructures(Arrays.copyOfRange(evt, pos, pos + dataLen));
             pos += dataLen;
             int rssi = evt[pos];
             pos += 1;

@@ -117,7 +117,11 @@ public final class Ble implements Closeable {
             int pos = 0;
             while (pos < this.rawAd.length) {
                 int len = this.rawAd[pos] & 0xFF;
-                if (len == 0 || pos + 1 + len > this.rawAd.length) break;
+                if (len == 0) {
+                    pos++;
+                    continue;
+                }
+                if (pos + 1 + len > this.rawAd.length) break;
                 int adType = this.rawAd[pos + 1] & 0xFF;
                 int dataStart = pos + 2;
                 int dataLen = len - 1;

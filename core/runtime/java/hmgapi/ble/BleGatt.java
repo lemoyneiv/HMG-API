@@ -14,37 +14,55 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Per-link L2CAP fragmentation/reassembly, dedicated LE ACL credit flow control,
- * L2CAP {@code 0x0005} connection-parameter responder, and ATT/GATT client protocol.
+ * L2CAP {@code 0x0005} connection-parameter responder, SMP {@code 0x0006} responder,
+ * local GAP/GATT server, and ATT/GATT client protocol.
  */
 final class BleGatt {
     static final int L2CAP_CID_ATT          = 0x0004;
     static final int L2CAP_CID_LE_SIGNALING = 0x0005;
+    static final int L2CAP_CID_SMP          = 0x0006;
 
-    static final int ATT_OP_ERROR_RSP         = 0x01;
-    static final int ATT_OP_MTU_REQ           = 0x02;
-    static final int ATT_OP_MTU_RSP           = 0x03;
-    static final int ATT_OP_FIND_INFO_REQ     = 0x04;
-    static final int ATT_OP_FIND_INFO_RSP     = 0x05;
-    static final int ATT_OP_READ_BY_TYPE_REQ  = 0x08;
-    static final int ATT_OP_READ_BY_TYPE_RSP  = 0x09;
-    static final int ATT_OP_READ_REQ          = 0x0A;
-    static final int ATT_OP_READ_RSP          = 0x0B;
-    static final int ATT_OP_READ_BLOB_REQ     = 0x0C;
-    static final int ATT_OP_READ_BLOB_RSP     = 0x0D;
-    static final int ATT_OP_READ_BY_GROUP_REQ = 0x10;
-    static final int ATT_OP_READ_BY_GROUP_RSP = 0x11;
-    static final int ATT_OP_WRITE_REQ         = 0x12;
-    static final int ATT_OP_WRITE_RSP         = 0x13;
-    static final int ATT_OP_HANDLE_VALUE_NTF  = 0x1B;
-    static final int ATT_OP_HANDLE_VALUE_IND  = 0x1D;
-    static final int ATT_OP_HANDLE_VALUE_CFM  = 0x1E;
-    static final int ATT_OP_WRITE_CMD         = 0x52;
+    static final int SMP_PAIRING_REQ               = 0x01;
+    static final int SMP_PAIRING_FAILED            = 0x05;
+    static final int SMP_SECURITY_REQ              = 0x0B;
+    static final int SMP_ERR_PAIRING_NOT_SUPPORTED = 0x05;
+
+    static final int ATT_OP_ERROR_RSP          = 0x01;
+    static final int ATT_OP_MTU_REQ            = 0x02;
+    static final int ATT_OP_MTU_RSP            = 0x03;
+    static final int ATT_OP_FIND_INFO_REQ      = 0x04;
+    static final int ATT_OP_FIND_INFO_RSP      = 0x05;
+    static final int ATT_OP_FIND_BY_TYPE_REQ   = 0x06;
+    static final int ATT_OP_FIND_BY_TYPE_RSP   = 0x07;
+    static final int ATT_OP_READ_BY_TYPE_REQ   = 0x08;
+    static final int ATT_OP_READ_BY_TYPE_RSP   = 0x09;
+    static final int ATT_OP_READ_REQ           = 0x0A;
+    static final int ATT_OP_READ_RSP           = 0x0B;
+    static final int ATT_OP_READ_BLOB_REQ      = 0x0C;
+    static final int ATT_OP_READ_BLOB_RSP      = 0x0D;
+    static final int ATT_OP_READ_MULTI_RSP     = 0x0F;
+    static final int ATT_OP_READ_BY_GROUP_REQ  = 0x10;
+    static final int ATT_OP_READ_BY_GROUP_RSP  = 0x11;
+    static final int ATT_OP_WRITE_REQ          = 0x12;
+    static final int ATT_OP_WRITE_RSP          = 0x13;
+    static final int ATT_OP_PREPARE_WRITE_RSP  = 0x17;
+    static final int ATT_OP_EXEC_WRITE_REQ     = 0x18;
+    static final int ATT_OP_EXEC_WRITE_RSP     = 0x19;
+    static final int ATT_OP_HANDLE_VALUE_NTF   = 0x1B;
+    static final int ATT_OP_HANDLE_VALUE_IND   = 0x1D;
+    static final int ATT_OP_HANDLE_VALUE_CFM   = 0x1E;
+    static final int ATT_OP_READ_MULTI_VAR_RSP = 0x21;
+    static final int ATT_OP_MULTI_HANDLE_NTF   = 0x23;
+    static final int ATT_OP_WRITE_CMD          = 0x52;
 
     static final int ATT_DEFAULT_MTU       = 23;
     static final int ATT_MAX_SUPPORTED_MTU = 512;
@@ -135,6 +153,14 @@ final class BleGatt {
     private final BleTransport transport;
     private final HciCommandSender hci;
     private final Object aclTxLock = new Object();
+    private final ExecutorService rxReplyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "hmgapi-ble-rxreply");
+            t.setDaemon(true);
+            return t;
+        }
+    });
 
     private volatile boolean dedicatedLeBuffers = false;
     private volatile int leAclDataPktLen = 0;
@@ -213,6 +239,12 @@ final class BleGatt {
                 0x00, 0x28
             };
             byte[] rsp = sendAttRequestSync(link, req, 3000);
+            if (rsp == null && startHandle == 0x0001 && link.connected) {
+                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+                if (link.connected) {
+                    rsp = sendAttRequestSync(link, req, 3000);
+                }
+            }
             if (rsp == null) throw new IOException("Read By Group Type timeout");
             if ((rsp[0] & 0xFF) == ATT_OP_ERROR_RSP) break;
             if ((rsp[0] & 0xFF) != ATT_OP_READ_BY_GROUP_RSP || rsp.length < 6) break;
@@ -540,26 +572,41 @@ final class BleGatt {
             return;
         }
 
+        boolean canWriteReq = (ch.properties & 0x08) != 0;
+        boolean canWriteCmd = (ch.properties & 0x04) != 0;
+        boolean useWriteReq = withResponse
+                ? (canWriteReq || !canWriteCmd)
+                : (!canWriteCmd && canWriteReq);
+
         try {
-            if (withResponse) {
+            if (useWriteReq) {
                 int attErr = writeAttributeSync(link, ch.valueHandle, payload, 3000);
+                if (attErr == 0x06 && canWriteCmd) {
+                    writeCommandNoRsp(link, ch.valueHandle, payload);
+                    session.sendDeviceEvent(link.mac, "WRITE_OK " + ch.uuid);
+                    return;
+                }
                 if (attErr != 0) {
                     session.sendDeviceEvent(link.mac, String.format(Locale.US, "ERR ATT_WRITE_ERROR %s 0x%02x", ch.uuid, attErr));
                     return;
                 }
                 session.sendDeviceEvent(link.mac, "WRITE_OK " + ch.uuid);
             } else {
-                byte[] pdu = new byte[3 + payload.length];
-                pdu[0] = (byte) ATT_OP_WRITE_CMD;
-                pdu[1] = (byte) (ch.valueHandle & 0xFF);
-                pdu[2] = (byte) ((ch.valueHandle >> 8) & 0xFF);
-                System.arraycopy(payload, 0, pdu, 3, payload.length);
-                sendL2capPduFragmented(link, L2CAP_CID_ATT, pdu);
+                writeCommandNoRsp(link, ch.valueHandle, payload);
                 session.sendDeviceEvent(link.mac, "WRITE_OK " + ch.uuid);
             }
         } catch (IOException e) {
             session.sendDeviceEvent(link.mac, "ERR WRITE_IO " + sanitizeToken(e.getMessage()));
         }
+    }
+
+    private void writeCommandNoRsp(Link link, int attrHandle, byte[] payload) throws IOException {
+        byte[] pdu = new byte[3 + payload.length];
+        pdu[0] = (byte) ATT_OP_WRITE_CMD;
+        pdu[1] = (byte) (attrHandle & 0xFF);
+        pdu[2] = (byte) ((attrHandle >> 8) & 0xFF);
+        System.arraycopy(payload, 0, pdu, 3, payload.length);
+        sendL2capPduFragmented(link, L2CAP_CID_ATT, pdu);
     }
 
     int writeAttributeSync(Link link, int attrHandle, byte[] value, long timeoutMs) throws IOException {
@@ -692,44 +739,92 @@ final class BleGatt {
                 handleAttPdu(link, completePdu);
             } else if (completeCid == L2CAP_CID_LE_SIGNALING) {
                 handleLeSignalingPdu(link, completePdu);
+            } else if (completeCid == L2CAP_CID_SMP) {
+                handleSmpPdu(link, completePdu);
             }
         }
     }
 
+    private void handleSmpPdu(final Link link, byte[] smp) {
+        if (smp == null || smp.length < 1) return;
+        int code = smp[0] & 0xFF;
+        // Reply Pairing Not Supported immediately to SMP Security_Request (0x0B) / Pairing_Request (0x01)
+        // so peripherals (e.g. Realtek RTL8762) terminate their 30s SMP timer instead of stalling GATT.
+        if (code == SMP_SECURITY_REQ || code == SMP_PAIRING_REQ) {
+            rxReplyExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    if (!link.connected) return;
+                    try {
+                        sendL2capPduFragmented(link, L2CAP_CID_SMP, new byte[] {
+                            (byte) SMP_PAIRING_FAILED,
+                            (byte) SMP_ERR_PAIRING_NOT_SUPPORTED
+                        });
+                    } catch (IOException ignored) {}
+                }
+            });
+        }
+    }
+
     private void handleLeSignalingPdu(final Link link, byte[] sig) {
-        if (sig.length < 4) return;
+        if (sig.length < 2) return;
         int code = sig[0] & 0xFF;
         final int identifier = sig[1] & 0xFF;
         // 0x12 = Connection Parameter Update Request
         if (code == 0x12 && sig.length >= 12) {
-            final int minInt = (sig[4] & 0xFF) | ((sig[5] & 0xFF) << 8);
-            final int maxInt = (sig[6] & 0xFF) | ((sig[7] & 0xFF) << 8);
-            final int latency = (sig[8] & 0xFF) | ((sig[9] & 0xFF) << 8);
-            final int timeout = (sig[10] & 0xFF) | ((sig[11] & 0xFF) << 8);
+            final int minInt = u16le(sig, 4);
+            final int maxInt = u16le(sig, 6);
+            final int latency = u16le(sig, 8);
+            final int timeout = u16le(sig, 10);
+            final boolean accept = shouldAcceptConnParamUpdate(minInt, maxInt, latency, timeout);
 
-            Thread worker = new Thread(new Runnable() {
+            rxReplyExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
+                    if (!link.connected) return;
                     try {
+                        if (!accept) {
+                            byte[] rejectRsp = new byte[] {
+                                0x13, (byte) identifier, 0x02, 0x00, 0x01, 0x00
+                            };
+                            sendL2capPduFragmented(link, L2CAP_CID_LE_SIGNALING, rejectRsp);
+                            return;
+                        }
+                        int effMaxInt = Math.max(minInt, Math.min(maxInt, 48));
+                        int effLatency = 0; // Clamp peripheral slave latency (e.g. RTL8762 lat=20) to 0 for low-latency GATT RX
+                        int effTimeout = Math.max(timeout, 400);
                         byte[] acceptRsp = new byte[] {
                             0x13, (byte) identifier, 0x02, 0x00, 0x00, 0x00
                         };
                         sendL2capPduFragmented(link, L2CAP_CID_LE_SIGNALING, acceptRsp);
+                        if (!link.connected) return;
 
                         byte[] upd = new byte[] {
-                            (byte) (link.connHandle & 0xFF), (byte) ((link.connHandle >> 8) & 0xFF),
+                            (byte) (link.connHandle & 0xFF), (byte) ((link.connHandle >> 8) & 0x0F),
                             (byte) (minInt & 0xFF), (byte) ((minInt >> 8) & 0xFF),
-                            (byte) (maxInt & 0xFF), (byte) ((maxInt >> 8) & 0xFF),
-                            (byte) (latency & 0xFF), (byte) ((latency >> 8) & 0xFF),
-                            (byte) (timeout & 0xFF), (byte) ((timeout >> 8) & 0xFF),
+                            (byte) (effMaxInt & 0xFF), (byte) ((effMaxInt >> 8) & 0xFF),
+                            (byte) (effLatency & 0xFF), (byte) ((effLatency >> 8) & 0xFF),
+                            (byte) (effTimeout & 0xFF), (byte) ((effTimeout >> 8) & 0xFF),
                             0x00, 0x00, 0x00, 0x00
                         };
                         hci.sendHciCommandSync(BleCentral.HCI_LE_CONN_UPDATE, upd, 1500);
                     } catch (IOException ignored) {}
                 }
-            }, "hmgapi-ble-connparam");
-            worker.setDaemon(true);
-            worker.start();
+            });
+            return;
+        }
+        // Reject unsupported L2CAP LE Signaling requests (e.g. 0x14 LE Credit Based Connection Request)
+        if (code != 0x01 && code != 0x07 && code != 0x13 && code != 0x15) {
+            final byte[] cmdRej = new byte[] { 0x01, (byte) identifier, 0x02, 0x00, 0x00, 0x00 };
+            rxReplyExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    if (!link.connected) return;
+                    try {
+                        sendL2capPduFragmented(link, L2CAP_CID_LE_SIGNALING, cmdRej);
+                    } catch (IOException ignored) {}
+                }
+            });
         }
     }
 
@@ -737,50 +832,58 @@ final class BleGatt {
         if (att.length < 1) return;
         int opcode = att[0] & 0xFF;
 
-        if (opcode == ATT_OP_MTU_REQ && att.length >= 3) {
-            final int clientRxMtu = (att[1] & 0xFF) | ((att[2] & 0xFF) << 8);
-            final int ourMax = link.maxServerMtu;
-            final int newMtu = Math.max(ATT_DEFAULT_MTU, Math.min(ourMax, clientRxMtu));
-            link.negotiatedMtu = newMtu;
-            Thread worker = new Thread(new Runnable() {
+        if (opcode == ATT_OP_MTU_REQ) {
+            final byte[] rsp;
+            final int notifyMtu;
+            if (att.length >= 3) {
+                int clientRxMtu = u16le(att, 1);
+                int ourMax = link.maxServerMtu;
+                int newMtu = Math.max(ATT_DEFAULT_MTU, Math.min(ourMax, clientRxMtu));
+                link.negotiatedMtu = newMtu;
+                notifyMtu = newMtu;
+                rsp = new byte[] {
+                    (byte) ATT_OP_MTU_RSP,
+                    (byte) (ourMax & 0xFF),
+                    (byte) ((ourMax >> 8) & 0xFF)
+                };
+            } else {
+                notifyMtu = -1;
+                rsp = attErrorRsp(ATT_OP_MTU_REQ, 0x0000, 0x04);
+            }
+            rxReplyExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
+                    if (!link.connected) return;
                     try {
-                        byte[] rsp = new byte[] {
-                            (byte) ATT_OP_MTU_RSP,
-                            (byte) (ourMax & 0xFF),
-                            (byte) ((ourMax >> 8) & 0xFF)
-                        };
                         sendL2capPduFragmented(link, L2CAP_CID_ATT, rsp);
-                        List<BleSession> targets;
-                        synchronized (link.owners) {
-                            targets = new ArrayList<BleSession>(link.owners);
-                        }
-                        for (BleSession s : targets) {
-                            s.sendDeviceEvent(link.mac, "MTU_CHANGED " + newMtu);
+                        if (notifyMtu > 0) {
+                            List<BleSession> targets;
+                            synchronized (link.owners) {
+                                targets = new ArrayList<BleSession>(link.owners);
+                            }
+                            for (BleSession s : targets) {
+                                s.sendDeviceEvent(link.mac, "MTU_CHANGED " + notifyMtu);
+                            }
                         }
                     } catch (IOException ignored) {}
                 }
-            }, "hmgapi-ble-mtursp");
-            worker.setDaemon(true);
-            worker.start();
+            });
             return;
         }
 
         if ((opcode == ATT_OP_HANDLE_VALUE_NTF || opcode == ATT_OP_HANDLE_VALUE_IND) && att.length >= 3) {
-            int valHandle = (att[1] & 0xFF) | ((att[2] & 0xFF) << 8);
+            int valHandle = u16le(att, 1);
             byte[] value = Arrays.copyOfRange(att, 3, att.length);
             if (opcode == ATT_OP_HANDLE_VALUE_IND) {
-                Thread worker = new Thread(new Runnable() {
+                rxReplyExecutor.execute(new Runnable() {
                     @Override
                     public void run() {
+                        if (!link.connected) return;
                         try {
                             sendL2capPduFragmented(link, L2CAP_CID_ATT, new byte[] { (byte) ATT_OP_HANDLE_VALUE_CFM });
                         } catch (IOException ignored) {}
                     }
-                }, "hmgapi-ble-indcfm");
-                worker.setDaemon(true);
-                worker.start();
+                });
             }
 
             GattCharDef ch = link.charsByValueHandle.get(valHandle);
@@ -808,19 +911,326 @@ final class BleGatt {
             return;
         }
 
-        CountDownLatch latch = link.waitingAttLatch;
-        if (latch != null) {
-            if (opcode == ATT_OP_ERROR_RSP && att.length >= 2) {
-                int reqOp = att[1] & 0xFF;
-                if (reqOp == link.waitingAttReqOpcode) {
+        if (isAttResponseOpcode(opcode)) {
+            CountDownLatch latch = link.waitingAttLatch;
+            if (latch != null) {
+                if (opcode == ATT_OP_ERROR_RSP && att.length >= 2) {
+                    int reqOp = att[1] & 0xFF;
+                    if (reqOp == link.waitingAttReqOpcode) {
+                        link.waitingAttResponse = att;
+                        latch.countDown();
+                    }
+                } else if (opcode == link.waitingAttReqOpcode + 1) {
                     link.waitingAttResponse = att;
                     latch.countDown();
                 }
-            } else if (opcode == link.waitingAttReqOpcode + 1) {
-                link.waitingAttResponse = att;
-                latch.countDown();
+            }
+            return;
+        }
+
+        final byte[] serverRsp = buildLocalGattServerResponse(att);
+        if (serverRsp != null) {
+            rxReplyExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    if (!link.connected) return;
+                    try {
+                        sendL2capPduFragmented(link, L2CAP_CID_ATT, serverRsp);
+                    } catch (IOException ignored) {}
+                }
+            });
+        }
+    }
+
+    static boolean isAttResponseOpcode(int attOp) {
+        switch (attOp & 0xFF) {
+            case ATT_OP_ERROR_RSP:
+            case ATT_OP_MTU_RSP:
+            case ATT_OP_FIND_INFO_RSP:
+            case ATT_OP_FIND_BY_TYPE_RSP:
+            case ATT_OP_READ_BY_TYPE_RSP:
+            case ATT_OP_READ_RSP:
+            case ATT_OP_READ_BLOB_RSP:
+            case ATT_OP_READ_MULTI_RSP:
+            case ATT_OP_READ_BY_GROUP_RSP:
+            case ATT_OP_WRITE_RSP:
+            case ATT_OP_PREPARE_WRITE_RSP:
+            case ATT_OP_EXEC_WRITE_RSP:
+            case ATT_OP_READ_MULTI_VAR_RSP:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static final int[] LOCAL_GATT_UUID16 = new int[] {
+        0x0000,
+        0x2800, // 0x0001: Primary Service (0x1800 Generic Access)
+        0x2803, // 0x0002: Characteristic Declaration (0x2A00 Device Name)
+        0x2A00, // 0x0003: Device Name value ("Gen5W")
+        0x2803, // 0x0004: Characteristic Declaration (0x2A01 Appearance)
+        0x2A01, // 0x0005: Appearance value (0x0000)
+        0x2800, // 0x0006: Primary Service (0x1801 Generic Attribute)
+        0x2803, // 0x0007: Characteristic Declaration (0x2A05 Service Changed)
+        0x2A05, // 0x0008: Service Changed value (Indicate-only)
+        0x2902  // 0x0009: CCCD for Service Changed
+    };
+
+    static byte[] attErrorRsp(int reqOp, int handle, int errCode) {
+        return new byte[] {
+            (byte) ATT_OP_ERROR_RSP,
+            (byte) (reqOp & 0xFF),
+            (byte) (handle & 0xFF),
+            (byte) ((handle >> 8) & 0xFF),
+            (byte) (errCode & 0xFF)
+        };
+    }
+
+    private static int u16le(byte[] b, int off) {
+        return (b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8);
+    }
+
+    private static String shortBtUuid(byte[] buf, int offset, int len) {
+        String full = parseAttUuidBytes(buf, offset, len);
+        if (full.length() == 36 && full.startsWith("0000") && full.endsWith(BT_BASE_UUID_SUFFIX)) {
+            return full.substring(4, 8);
+        }
+        return full;
+    }
+
+    /**
+     * Stateless Local GAP/GATT Server for {@code CID 0x0004}.
+     * Answers reverse GATT Client probes (e.g. Realtek RTL8762 {@code gaps_client} / {@code ancs_client})
+     * immediately so the peripheral never hits the 30.0s ATT Transaction Timeout.
+     */
+    static byte[] buildLocalGattServerResponse(byte[] pdu) {
+        if (pdu == null || pdu.length == 0) return null;
+        int op = pdu[0] & 0xFF;
+        if ((op & 0x40) != 0
+                || isAttResponseOpcode(op)
+                || op == ATT_OP_HANDLE_VALUE_NTF
+                || op == ATT_OP_HANDLE_VALUE_IND
+                || op == ATT_OP_HANDLE_VALUE_CFM
+                || op == ATT_OP_MULTI_HANDLE_NTF) {
+            return null;
+        }
+
+        if (op == ATT_OP_MTU_REQ) {
+            if (pdu.length < 3) return attErrorRsp(op, 0x0000, 0x04);
+            return new byte[] {
+                (byte) ATT_OP_MTU_RSP,
+                (byte) (ATT_DEFAULT_MTU & 0xFF),
+                (byte) ((ATT_DEFAULT_MTU >> 8) & 0xFF)
+            };
+        }
+
+        if (op == ATT_OP_READ_BY_GROUP_REQ) {
+            if (pdu.length != 7 && pdu.length != 21) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int startH = u16le(pdu, 1);
+            int endH = u16le(pdu, 3);
+            if (startH == 0 || startH > endH) {
+                return attErrorRsp(op, startH, 0x01);
+            }
+            String groupUuid = shortBtUuid(pdu, 5, pdu.length - 5);
+            if ("2800".equals(groupUuid)) {
+                boolean inc1800 = (startH <= 0x0001 && endH >= 0x0001);
+                boolean inc1801 = (startH <= 0x0006 && endH >= 0x0006);
+                if (!inc1800 && !inc1801) {
+                    return attErrorRsp(op, startH, 0x0A);
+                }
+                int count = (inc1800 ? 1 : 0) + (inc1801 ? 1 : 0);
+                byte[] out = new byte[2 + count * 6];
+                out[0] = (byte) ATT_OP_READ_BY_GROUP_RSP;
+                out[1] = 0x06;
+                int pos = 2;
+                if (inc1800) {
+                    out[pos++] = 0x01; out[pos++] = 0x00;
+                    out[pos++] = 0x05; out[pos++] = 0x00;
+                    out[pos++] = 0x00; out[pos++] = 0x18;
+                }
+                if (inc1801) {
+                    out[pos++] = 0x06; out[pos++] = 0x00;
+                    out[pos++] = 0x09; out[pos++] = 0x00;
+                    out[pos++] = 0x01; out[pos++] = 0x18;
+                }
+                return out;
+            }
+            if ("2801".equals(groupUuid)) {
+                return attErrorRsp(op, startH, 0x0A);
+            }
+            return attErrorRsp(op, startH, 0x10);
+        }
+
+        if (op == ATT_OP_FIND_BY_TYPE_REQ) {
+            if (pdu.length < 7) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int startH = u16le(pdu, 1);
+            int endH = u16le(pdu, 3);
+            int attrType = u16le(pdu, 5);
+            if (startH == 0 || startH > endH) {
+                return attErrorRsp(op, startH, 0x01);
+            }
+            int valLen = pdu.length - 7;
+            if (attrType == 0x2800 && (valLen == 2 || valLen == 16)) {
+                String targetSvc = shortBtUuid(pdu, 7, valLen);
+                if ("1800".equals(targetSvc) && startH <= 0x0001 && endH >= 0x0001) {
+                    return new byte[] { (byte) ATT_OP_FIND_BY_TYPE_RSP, 0x01, 0x00, 0x05, 0x00 };
+                }
+                if ("1801".equals(targetSvc) && startH <= 0x0006 && endH >= 0x0006) {
+                    return new byte[] { (byte) ATT_OP_FIND_BY_TYPE_RSP, 0x06, 0x00, 0x09, 0x00 };
+                }
+            }
+            return attErrorRsp(op, startH, 0x0A);
+        }
+
+        if (op == ATT_OP_READ_BY_TYPE_REQ) {
+            if (pdu.length != 7 && pdu.length != 21) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int startH = u16le(pdu, 1);
+            int endH = u16le(pdu, 3);
+            if (startH == 0 || startH > endH) {
+                return attErrorRsp(op, startH, 0x01);
+            }
+            String attrUuid = shortBtUuid(pdu, 5, pdu.length - 5);
+            if ("2803".equals(attrUuid)) {
+                ByteArrayOutputStream items = new ByteArrayOutputStream(21);
+                if (startH <= 0x0002 && endH >= 0x0002) {
+                    items.write(new byte[] { 0x02, 0x00, 0x02, 0x03, 0x00, 0x00, 0x2A }, 0, 7);
+                }
+                if (startH <= 0x0004 && endH >= 0x0004) {
+                    items.write(new byte[] { 0x04, 0x00, 0x02, 0x05, 0x00, 0x01, 0x2A }, 0, 7);
+                }
+                if (startH <= 0x0007 && endH >= 0x0007) {
+                    items.write(new byte[] { 0x07, 0x00, 0x20, 0x08, 0x00, 0x05, 0x2A }, 0, 7);
+                }
+                if (items.size() == 0) {
+                    return attErrorRsp(op, startH, 0x0A);
+                }
+                byte[] body = items.toByteArray();
+                byte[] out = new byte[2 + body.length];
+                out[0] = (byte) ATT_OP_READ_BY_TYPE_RSP;
+                out[1] = 0x07;
+                System.arraycopy(body, 0, out, 2, body.length);
+                return out;
+            }
+            if ("2a00".equals(attrUuid) && startH <= 0x0003 && endH >= 0x0003) {
+                return new byte[] { (byte) ATT_OP_READ_BY_TYPE_RSP, 0x07, 0x03, 0x00, 'G', 'e', 'n', '5', 'W' };
+            }
+            if ("2a01".equals(attrUuid) && startH <= 0x0005 && endH >= 0x0005) {
+                return new byte[] { (byte) ATT_OP_READ_BY_TYPE_RSP, 0x04, 0x05, 0x00, 0x00, 0x00 };
+            }
+            if ("2800".equals(attrUuid)) {
+                ByteArrayOutputStream items = new ByteArrayOutputStream(8);
+                if (startH <= 0x0001 && endH >= 0x0001) {
+                    items.write(new byte[] { 0x01, 0x00, 0x00, 0x18 }, 0, 4);
+                }
+                if (startH <= 0x0006 && endH >= 0x0006) {
+                    items.write(new byte[] { 0x06, 0x00, 0x01, 0x18 }, 0, 4);
+                }
+                if (items.size() == 0) {
+                    return attErrorRsp(op, startH, 0x0A);
+                }
+                byte[] body = items.toByteArray();
+                byte[] out = new byte[2 + body.length];
+                out[0] = (byte) ATT_OP_READ_BY_TYPE_RSP;
+                out[1] = 0x04;
+                System.arraycopy(body, 0, out, 2, body.length);
+                return out;
+            }
+            if ("2902".equals(attrUuid) && startH <= 0x0009 && endH >= 0x0009) {
+                return new byte[] { (byte) ATT_OP_READ_BY_TYPE_RSP, 0x04, 0x09, 0x00, 0x00, 0x00 };
+            }
+            if ("2a05".equals(attrUuid) && startH <= 0x0008 && endH >= 0x0008) {
+                return attErrorRsp(op, 0x0008, 0x02);
+            }
+            return attErrorRsp(op, startH, 0x0A);
+        }
+
+        if (op == ATT_OP_FIND_INFO_REQ) {
+            if (pdu.length != 5) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int startH = u16le(pdu, 1);
+            int endH = u16le(pdu, 3);
+            if (startH == 0 || startH > endH) {
+                return attErrorRsp(op, startH, 0x01);
+            }
+            int lo = Math.max(1, startH);
+            int hi = Math.min(9, endH);
+            if (lo > hi) {
+                return attErrorRsp(op, startH, 0x0A);
+            }
+            int count = Math.min(5, hi - lo + 1);
+            byte[] out = new byte[2 + count * 4];
+            out[0] = (byte) ATT_OP_FIND_INFO_RSP;
+            out[1] = 0x01;
+            int pos = 2;
+            for (int i = 0; i < count; i++) {
+                int h = lo + i;
+                int u16 = LOCAL_GATT_UUID16[h];
+                out[pos++] = (byte) (h & 0xFF);
+                out[pos++] = (byte) ((h >> 8) & 0xFF);
+                out[pos++] = (byte) (u16 & 0xFF);
+                out[pos++] = (byte) ((u16 >> 8) & 0xFF);
+            }
+            return out;
+        }
+
+        if (op == ATT_OP_READ_REQ) {
+            if (pdu.length != 3) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int h = u16le(pdu, 1);
+            switch (h) {
+                case 0x0001: return new byte[] { (byte) ATT_OP_READ_RSP, 0x00, 0x18 };
+                case 0x0002: return new byte[] { (byte) ATT_OP_READ_RSP, 0x02, 0x03, 0x00, 0x00, 0x2A };
+                case 0x0003: return new byte[] { (byte) ATT_OP_READ_RSP, 'G', 'e', 'n', '5', 'W' };
+                case 0x0004: return new byte[] { (byte) ATT_OP_READ_RSP, 0x02, 0x05, 0x00, 0x01, 0x2A };
+                case 0x0005: return new byte[] { (byte) ATT_OP_READ_RSP, 0x00, 0x00 };
+                case 0x0006: return new byte[] { (byte) ATT_OP_READ_RSP, 0x01, 0x18 };
+                case 0x0007: return new byte[] { (byte) ATT_OP_READ_RSP, 0x20, 0x08, 0x00, 0x05, 0x2A };
+                case 0x0008: return attErrorRsp(op, 0x0008, 0x02);
+                case 0x0009: return new byte[] { (byte) ATT_OP_READ_RSP, 0x00, 0x00 };
+                default:     return attErrorRsp(op, h, 0x01);
             }
         }
+
+        if (op == ATT_OP_READ_BLOB_REQ) {
+            if (pdu.length != 5) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int h = u16le(pdu, 1);
+            return attErrorRsp(op, h, (h >= 1 && h <= 9) ? 0x0B : 0x01);
+        }
+
+        if (op == ATT_OP_WRITE_REQ) {
+            if (pdu.length < 3) {
+                return attErrorRsp(op, 0x0000, 0x04);
+            }
+            int h = u16le(pdu, 1);
+            if (h == 0x0009) {
+                if (pdu.length != 5) {
+                    return attErrorRsp(op, 0x0009, 0x0D);
+                }
+                return new byte[] { (byte) ATT_OP_WRITE_RSP };
+            }
+            return attErrorRsp(op, h, (h >= 1 && h <= 8) ? 0x03 : 0x01);
+        }
+
+        int errHandle = (op != ATT_OP_EXEC_WRITE_REQ && pdu.length >= 3) ? u16le(pdu, 1) : 0x0000;
+        return attErrorRsp(op, errHandle, 0x06);
+    }
+
+    static boolean shouldAcceptConnParamUpdate(int minInt, int maxInt, int latency, int timeout) {
+        if (minInt < 6 || maxInt < minInt || maxInt > 3200) return false;
+        if (latency < 0 || latency > 499) return false;
+        if (timeout < 10 || timeout > 3200) return false;
+        if ((timeout * 4) <= (1 + latency) * maxInt) return false;
+        return minInt >= 12 && minInt <= 48 && timeout >= 100;
     }
 
     // -------------------------------------------------------------------------

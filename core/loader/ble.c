@@ -142,11 +142,12 @@ static volatile int g_ble_listening = 0;
 static volatile u2  g_le_handles[MAX_TRACKED_LE_HANDLES];
 static volatile int g_rx_pipe_lock  = 0;
 
-static volatile int g_pkt_rx_count     = 0;
-static volatile int g_pkt_tx_count     = 0;
-static volatile int g_pkt_drop_count   = 0;
-static volatile int g_hook_installed   = 0;
-static volatile int g_tx_thread_active = 0;
+static volatile int   g_pkt_rx_count     = 0;
+static volatile int   g_pkt_tx_count     = 0;
+static volatile int   g_pkt_drop_count   = 0;
+static volatile int   g_hook_installed   = 0;
+static volatile int   g_tx_thread_active = 0;
+static volatile void *g_active_transac   = 0;
 
 static int is_tracked_le_handle(u2 h)
 {
@@ -255,6 +256,19 @@ static void free_rx_buf(dealloc_cb orig_dealloc, void *p_transac, char *p_buf)
     else if (g_GKI_freebuf) g_GKI_freebuf(p_transac);
 }
 
+static int forward_orig_data_ind(data_ind_cb orig_ind, void *p_transac, char *p_buf, int buf_len)
+{
+    int rc;
+    if (!orig_ind) return 0;
+    if (!p_transac) return orig_ind(p_transac, p_buf, buf_len);
+    g_active_transac = p_transac;
+    __sync_synchronize();
+    rc = orig_ind(p_transac, p_buf, buf_len);
+    __sync_synchronize();
+    if (g_active_transac == p_transac) g_active_transac = 0;
+    return rc;
+}
+
 static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
 {
     data_ind_cb orig_ind = g_orig_data_ind;
@@ -264,15 +278,21 @@ static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
     u1 *raw;
     int len;
 
-    if (!p_transac) return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
-    if (!g_ble_listening) return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+    if (!p_transac) return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
+    if (g_active_transac == p_transac) {
+        /* Guard against mutual hook recursion if another library interposed on top of us */
+        g_active_transac = 0;
+        free_rx_buf(orig_dealloc, p_transac, p_buf);
+        return 0;
+    }
+    if (!g_ble_listening) return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
 
     hdr = (hc_bt_hdr_t *)p_transac;
     evt_mask = (u2)(hdr->event & 0xFF00);
     raw = hdr->data + hdr->offset;
     len = (int)hdr->len;
 
-    if (len <= 0) return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+    if (len <= 0) return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
 
     if (evt_mask == MSG_HC_TO_STACK_HCI_EVT) {
         u1 evt_code = raw[0];
@@ -300,7 +320,7 @@ static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
                 free_rx_buf(orig_dealloc, p_transac, p_buf);
                 return 0;
             }
-            return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+            return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
         }
 
         if ((evt_code == 0x08 || evt_code == 0x30) && len >= 5) {
@@ -310,7 +330,7 @@ static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
                 free_rx_buf(orig_dealloc, p_transac, p_buf);
                 return 0;
             }
-            return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+            return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
         }
 
         if (evt_code == 0x13 && len >= 3) {
@@ -327,7 +347,7 @@ static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
                     if (c > 0) any_other = 1;
                 }
             }
-            if (!any_our) return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+            if (!any_our) return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
             emit_rx_packet(PKT_TYPE_EVT, raw, len);
             if (!any_other) {
                 free_rx_buf(orig_dealloc, p_transac, p_buf);
@@ -344,15 +364,15 @@ static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
                     raw[base + 3] = 0;
                 }
             }
-            return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+            return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
         }
 
         if (evt_code == 0x0E || evt_code == 0x0F) {
             emit_rx_packet(PKT_TYPE_EVT, raw, len);
-            return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+            return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
         }
 
-        return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+        return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
     }
 
     if (evt_mask == MSG_HC_TO_STACK_HCI_ACL && len >= 4) {
@@ -364,7 +384,7 @@ static int my_data_ind(void *p_transac, char *p_buf, int buf_len)
         }
     }
 
-    return orig_ind ? orig_ind(p_transac, p_buf, buf_len) : 0;
+    return forward_orig_data_ind(orig_ind, p_transac, p_buf, buf_len);
 }
 
 static int resolve_cbacks_layout(void **cur, int *n_words, int *dealloc_idx, int *data_ind_idx)
@@ -391,7 +411,7 @@ static int resolve_cbacks_layout(void **cur, int *n_words, int *dealloc_idx, int
 
 static int install_cbacks_hook(void ***pp_cbacks)
 {
-    void **cur;
+    void **cur, **src;
     int n_words = 0, dealloc_idx = -1, data_ind_idx = -1, i;
 
     if (!pp_cbacks || !*pp_cbacks) return -5;
@@ -406,13 +426,23 @@ static int install_cbacks_hook(void ***pp_cbacks)
         return -5;
     }
 
-    for (i = 0; i < n_words; i++) {
-        g_my_cbacks[i] = cur[i];
+    /*
+     * Preserve the original Bluedroid callback table if another library interposed on top
+     * of g_my_cbacks without unhooking us, preventing mutual data_ind recursion.
+     */
+    if (g_orig_cbacks_ptr && g_orig_data_ind && g_data_ind_idx == data_ind_idx) {
+        src = g_orig_cbacks_ptr;
+    } else {
+        src = cur;
+        g_orig_cbacks_ptr = cur;
+        g_orig_dealloc = (dealloc_cb)cur[dealloc_idx];
+        g_orig_data_ind = (data_ind_cb)cur[data_ind_idx];
+        g_data_ind_idx = data_ind_idx;
     }
-    g_orig_cbacks_ptr = cur;
-    g_orig_dealloc = (dealloc_cb)cur[dealloc_idx];
-    g_orig_data_ind = (data_ind_cb)cur[data_ind_idx];
-    g_data_ind_idx = data_ind_idx;
+
+    for (i = 0; i < n_words; i++) {
+        g_my_cbacks[i] = src[i];
+    }
     g_pp_bt_hc_cbacks = pp_cbacks;
     g_my_cbacks[data_ind_idx] = (void *)my_data_ind;
 
@@ -673,6 +703,10 @@ int n_bleState(void *env, void *cls, int listening, int handle_op)
 {
     (void)env; (void)cls;
     g_ble_listening = listening ? 1 : 0;
+    if (g_ble_listening && g_pp_bt_hc_cbacks && *g_pp_bt_hc_cbacks &&
+        *g_pp_bt_hc_cbacks != g_my_cbacks && g_orig_cbacks_ptr && g_data_ind_idx >= 0) {
+        (void)install_cbacks_hook(g_pp_bt_hc_cbacks);
+    }
     if (handle_op >= 0) {
         int op = (handle_op >> 16) & 0xFF;
         u2 h = (u2)(handle_op & 0x0FFF);
@@ -707,6 +741,15 @@ void n_bleShutdown(void *env, void *cls)
     if (g_pp_bt_hc_cbacks && *g_pp_bt_hc_cbacks == g_my_cbacks && g_orig_cbacks_ptr) {
         *g_pp_bt_hc_cbacks = g_orig_cbacks_ptr;
         __sync_synchronize();
+        g_orig_cbacks_ptr = 0;
+        g_orig_dealloc = 0;
+        g_orig_data_ind = 0;
+        g_data_ind_idx = -1;
+    } else if (!g_pp_bt_hc_cbacks || !*g_pp_bt_hc_cbacks) {
+        g_orig_cbacks_ptr = 0;
+        g_orig_dealloc = 0;
+        g_orig_data_ind = 0;
+        g_data_ind_idx = -1;
     }
     g_hook_installed = 0;
 

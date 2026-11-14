@@ -103,6 +103,16 @@ static void check_true(const char *name, int cond)
     else { printf("FAIL  %s\n", name); fail = 1; }
 }
 
+static data_ind_cb g_wrapper_orig_ind = 0;
+static int g_wrapper_calls = 0;
+
+static int fake_wrapper_data_ind(void *p_transac, char *p_buf, int len)
+{
+    g_wrapper_calls++;
+    /* Simulate a competing hook that forwards Classic events to its saved orig_ind */
+    return g_wrapper_orig_ind ? g_wrapper_orig_ind(p_transac, p_buf, len) : 0;
+}
+
 int main(void)
 {
     int pfd[2];
@@ -343,6 +353,53 @@ int main(void)
 
         n_bleShutdown(0, 0);
         check_true("native: n_bleShutdown restores 7-word AOSP pointer", p_cbacks == aosp_cbacks);
+        free(b);
+    }
+
+    /* 10. Interposed wrapper coexistence: re-asserting hook never creates mutual recursion */
+    {
+        const u1 cmd_cmp[] = { 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 };
+        hc_bt_hdr_t *b = mk_pkt(MSG_HC_TO_STACK_HCI_EVT, cmd_cmp, (int)sizeof cmd_cmp);
+        int i;
+
+        p_cbacks = bplus_ro;
+        g_rx_write_fd = pfd[1];
+        check_int("native: re-hook PROT_READ BPlus table for coexistence test",
+                  0, install_cbacks_hook(&p_cbacks));
+
+        /* Simulate another JNI library wrapping g_my_cbacks */
+        for (i = 0; i < 10; i++) other_cbacks[i] = p_cbacks[i];
+        g_wrapper_orig_ind = (data_ind_cb)p_cbacks[7];
+        other_cbacks[7] = (void *)fake_wrapper_data_ind;
+        p_cbacks = other_cbacks;
+        check_int("native: detects competing wrapper on bt_hc_cbacks", 0, n_bleStat(0, 0, 0));
+
+        /* n_bleState(listening=1) reclaims bt_hc_cbacks without pointing g_orig_data_ind at wrapper */
+        n_bleState(0, 0, 1, -1);
+        check_true("native: n_bleState(1) reclaims bt_hc_cbacks", p_cbacks == g_my_cbacks);
+        check_int("native: hook intact after reclaim", 1, n_bleStat(0, 0, 0));
+
+        g_forwarded = g_wrapper_calls = 0;
+        ((data_ind_cb)p_cbacks[7])(b, (char *)(b->data + b->offset), (int)b->len);
+        check_int("native: reclaimed hook forwards directly to stock Bluedroid", 1, g_forwarded);
+        check_int("native: reclaimed hook does not recurse through wrapper", 0, g_wrapper_calls);
+        (void)read_pipe_frame(pfd[0], &rx_type, rx_buf, (int)sizeof rx_buf);
+
+        /* Also test shutdown + re-init while wrapper is on top */
+        p_cbacks = other_cbacks;
+        n_bleShutdown(0, 0);
+        g_rx_write_fd = pfd[1];
+        check_int("native: re-install after interposed shutdown succeeds",
+                  0, install_cbacks_hook(&p_cbacks));
+        n_bleState(0, 0, 1, -1);
+        g_forwarded = g_wrapper_calls = 0;
+        ((data_ind_cb)p_cbacks[7])(b, (char *)(b->data + b->offset), (int)b->len);
+        check_int("native: re-installed hook forwards without recursion", 1, g_forwarded);
+        check_int("native: wrapper still bypassed cleanly", 0, g_wrapper_calls);
+        (void)read_pipe_frame(pfd[0], &rx_type, rx_buf, (int)sizeof rx_buf);
+
+        n_bleShutdown(0, 0);
+        check_true("native: final shutdown restores PROT_READ BPlus pointer", p_cbacks == bplus_ro);
         free(b);
     }
 
