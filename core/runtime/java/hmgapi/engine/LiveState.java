@@ -172,14 +172,19 @@ final class LiveState {
 
     /** a mod's native patch recipes (hooks.native) too: the apps that load the libraries read them */
     @SuppressWarnings("unchecked")
-    static void nativeReadable(File dir, Map<String, Object> mod) {
+    static void nativeReadable(File dir, Map<String, Object> mod) throws Exception {
         Object hooks = mod.get("hooks");
         Object nat = hooks instanceof Map ? ((Map<String, Object>) hooks).get("native") : null;
         if (!(nat instanceof Map)) return;
+        String base = dir.getCanonicalPath() + File.separator;
         for (Object files : ((Map<String, Object>) nat).values()) {
             if (!(files instanceof List)) continue;
             for (Object f : (List<Object>) files) {
-                File r = new File(dir, String.valueOf(f));
+                String name = String.valueOf(f);
+                File r = new File(dir, name);
+                // as for the code JAR: a path (or a symlink in it) out of the mod's own folder
+                // must not make another mod's or a private file readable
+                if (new File(name).isAbsolute() || !r.getCanonicalPath().startsWith(base) || !r.isFile()) continue;
                 for (File d = r.getParentFile(); d != null && !d.equals(dir); d = d.getParentFile()) traversable(d);
                 r.setReadable(true, false);
             }

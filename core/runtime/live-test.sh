@@ -67,4 +67,20 @@ ln -s "$R/data/hmgapi/mods/private.jar" "$R/data/hmgapi/mods/link/linked.jar"
 mod absolute ", \"hooks\": {\"jar\": \"$R/data/hmgapi/mods/private.jar\", \"entry\": \"example.Bad\"}"
 eng publish-state
 check "path escapes and symlinks do not expose private files" "-rw-------" "$(ls -l "$R/data/hmgapi/mods/private.jar" | cut -c1-10)"
+
+# The same for native patch recipes (hooks.native): the one in the mod's folder readable,
+# nothing outside it (the owner's settings, another mod's files), by path or by symlink.
+chmod 700 "$R/data/hmgapi/settings"; chmod 600 "$R/data/hmgapi/settings/base.json"
+mod recipes ", \"hooks\": {\"jar\": \"hooks.jar\", \"entry\": \"example.Ev\", \"native\": {\"libx.so\": [\"recipes/x.recipe\", \"../../settings/base.json\", \"link.recipe\", \"$R/data/hmgapi/mods/private.jar\"]}}"
+mkdir -p "$R/data/hmgapi/mods/recipes/recipes"
+echo recipe > "$R/data/hmgapi/mods/recipes/recipes/x.recipe"
+chmod 700 "$R/data/hmgapi/mods/recipes/recipes"; chmod 600 "$R/data/hmgapi/mods/recipes/recipes/x.recipe"
+ln -s "$R/data/hmgapi/mods/base/private.bin" "$R/data/hmgapi/mods/recipes/link.recipe"
+eng publish-state; check "publish with native recipes" 0 $rc
+check "a mod's own recipe readable" "-rw-r--r--" "$(ls -l "$R/data/hmgapi/mods/recipes/recipes/x.recipe" | cut -c1-10)"
+check "... its folder traversable only" "drwx--x--x" "$(ls -ld "$R/data/hmgapi/mods/recipes/recipes" | cut -c1-10)"
+check "a recipe path out of the mod: the owner's settings stay private" "-rw-------" "$(ls -l "$R/data/hmgapi/settings/base.json" | cut -c1-10)"
+check "... and the settings folder closed" "drwx------" "$(ls -ld "$R/data/hmgapi/settings" | cut -c1-10)"
+check "a recipe symlink to another mod's file: stays private" "-rw-------" "$(ls -l "$R/data/hmgapi/mods/base/private.bin" | cut -c1-10)"
+check "an absolute recipe path: stays private" "-rw-------" "$(ls -l "$R/data/hmgapi/mods/private.jar" | cut -c1-10)"
 exit $fail

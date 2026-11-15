@@ -106,7 +106,22 @@ final class SettingsTab {
                 "Block mod light control", "block_ambient_light", false, null);
     }
 
+    /** Are HMG-API's hooks running on this car? The update block is one of them. */
+    static boolean hooksOn() {
+        try {
+            JSONObject map = new JSONObject(HmgApiStatus.json).optJSONObject("map");
+            return map != null && map.optBoolean("on");
+        } catch (Exception e) {   // no status at all: the hooks didn't load
+            return false;
+        }
+    }
+
     void updates() {
+        if (!hooksOn()) {
+            Ui.text(page, "HMG-API's hooks aren't running on this car (see Hook map), so it isn't blocking over-the-air updates: "
+                    + "the car can download and install them. The car's own switch is what counts until the hooks run: Settings > "
+                    + "General > Install Infotainment System Updates Automatically.", 16, true, Ui.TEXT);
+        }
         owner("Over-the-air updates", "Off (the default): HMG-API blocks the car's own update downloads, so an update can't "
                 + "replace what HMG-API and your mods depend on. USB and dealer updates still work. Takes effect at the next restart.",
                 "Allow over-the-air updates", "ota_updates", false, new Runnable() {

@@ -47,7 +47,9 @@ Supported: the newest release (including betas). Fixes go into the next one.
   the owner's data; log lines are scrubbed before they go in.
 - **Updates:** HMG-API releases are signed with HMG-API's release key and checked
   before they install. The car's own over-the-air updates are blocked unless the owner
-  turns them on.
+  turns them on, while HMG-API's hooks run: on a car where they don't (no hook map that
+  fits it, or the boot guard turned them off), nothing is blocked, and the app's Updates
+  page says so.
 
 ## In this repository
 

@@ -165,11 +165,14 @@ final class Commands {
      * The owner's OK for a mod's commands: the first time a mod uses one, it's refused
      * and the owner is asked (Allow / Don't allow, kept per mod and command). Undoing
      * (release, stop, restore, off) never waits: a mod can always give back what it took.
+     * Not guide_lines off: that turns the owner's guide lines off, a change like "on"
+     * (its undo is restore).
      */
     String owner(String mod, String cmd, String a0) {
         // "-" is the owner (root over adb, HMG-API's app): their own request needs no OK from themselves
         if (!car.askFirst() || mod == null || mod.isEmpty() || "hmgapi".equals(mod) || "-".equals(mod)) return null;
-        if ("release".equals(a0) || "stop".equals(a0) || "restore".equals(a0) || "off".equals(a0)) return null;
+        if ("release".equals(a0) || "stop".equals(a0) || "restore".equals(a0)) return null;
+        if ("off".equals(a0) && !"guide_lines".equals(cmd)) return null;
         String a = car.answer(mod, cmd);
         if ("yes".equals(a)) return null;
         if ("no".equals(a)) return "refused: the owner didn't allow " + cmd + " for " + mod + " (HMG-API app: Settings, Vehicle)";

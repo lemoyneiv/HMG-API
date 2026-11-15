@@ -33,7 +33,7 @@ STOCK=${HMGAPI_CAR:+$HMGAPI_CAR/bin/app_process}
 if [ -f "$STOCK" ]; then cp $STOCK $R/system/bin/app_process; else head -c 9000 /dev/urandom > $R/system/bin/app_process; fi
 chmod 755 $R/system/bin/app_process
 printf '#!/system/bin/sh\n# NEMESIS\nnemesis watchdog\nexit 0\n' > $R/system/etc/install-recovery.sh; chmod 755 $R/system/etc/install-recovery.sh
-printf 'echo qb stock\n# NEMESIS_QB_HOOK\nnemesis watchdog\n' > $R/system/etc/qb_runtime.sh
+printf 'RED="\\x1b[1;31m"\necho qb stock\n# NEMESIS_QB_HOOK\nnemesis watchdog' > $R/system/etc/qb_runtime.sh   # backslashes and no newline at the end: the uninstall still gives these bytes back
 echo stock > $R/system/lib/libc.so
 # NEMESIS: uninstall <id> runs the package's preuninstall as native/pkg.c does (cwd the package,
 # the caller's environment), then removes it; every call goes to nemesis.log

@@ -190,9 +190,15 @@ run root service-stop svc loop >/dev/null
 waitfor '[ "$(st loop)" = stopped ]' || true
 check "stopped" stopped "$(st loop)"
 check "old process gone" no "$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)"
+# a service's own folder is its user's: a link put where its dalvik-cache goes must not get
+# the daemon (root on the unit) to chmod or chown what it points at
+echo private > "$T/private"; chmod 644 "$T/private"
+rm -rf "$S/run/svc/loop/dalvik-cache"; ln -s "$T/private" "$S/run/svc/loop/dalvik-cache"
 run root service-start svc loop >/dev/null
 waitfor '[ "$(st loop)" = running ]' || true
 check "started again" running "$(st loop)"
+check "a link in place of the service's dalvik-cache: what it points at is untouched" "-rw-r--r--" "$(ls -l "$T/private" | cut -c1-10)"
+check "... and the link is replaced by the folder" "drwx------" "$(ls -ld "$S/run/svc/loop/dalvik-cache" | cut -c1-10)"
 pid=$(run root services svc | awk '$2 == "loop" { print $4 }')
 has "public/services.txt lists running mod service pid" "$pid svc" "$(cat "$S/public/services.txt")"
 check "public/services.txt leaves out core hmgapi services" "" "$(grep ' hmgapi$' "$S/public/services.txt" || true)"

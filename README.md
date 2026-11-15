@@ -49,7 +49,7 @@ and the install starts again from the new firmware's
 doesn't work, car or firmware support (the Car Report's QR code fills it in), a new
 hook point, or an idea. Guides are in the [wiki](https://github.com/Open-HMG/HMG-API/wiki).
 
-> **Status: 1.0.2; [1.1.0-beta.1](https://github.com/Open-HMG/HMG-API/releases/tag/v1.1.0-beta.1) is out for testing.** Tested on a US Kia EV6 (260507): the hook runtime,
+> **Status: 1.0.2; [1.1.0-rc.1](https://github.com/Open-HMG/HMG-API/releases/tag/v1.1.0-rc.1), the release candidate, is out for testing.** Tested on a US Kia EV6 (260507): the hook runtime,
 > mods, the app, buttons, the side panel, Android Auto turn-by-turn and projection
 > events, the Car Report. CarPlay on HMG-API, the installers on a car without adb, and
 > other cars aren't tested yet. Leafia 1.x (HMG Leafia Plus) is the previous project.

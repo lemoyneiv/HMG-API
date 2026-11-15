@@ -122,8 +122,13 @@ else
     log "app_process: stock again ($ORIG)"
 fi
 rm -f "$KEEP"
-hook_remove /system/etc/install-recovery.sh || fail "boot hook in install-recovery.sh"
-hook_remove /system/etc/qb_runtime.sh || fail "boot hook in qb_runtime.sh"
+# the boot scripts: the install's backup byte for byte when nothing else changed the file
+# since (lib.sh, hook_restore); otherwise only HMG-API's block comes out. Never the backup
+# after a firmware update: it's the old firmware's.
+for f in /system/etc/install-recovery.sh /system/etc/qb_runtime.sh; do
+    if [ -z "$RESET" ] && hook_restore "$f" "$D/stock$f"; then log "$f: stock bytes back ($(sum "$ROOT$f"))"
+    else hook_remove "$f" || fail "boot hook in $f"; fi
+done
 for f in /system/lib/libhmgapi_hook.so /system/framework/hmgapi-hook.jar /system/bin/lpatch /system/bin/hmgapid; do
     rm -f "$ROOT$f"
 done

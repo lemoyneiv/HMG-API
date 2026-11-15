@@ -341,6 +341,10 @@ public final class CommandsTest {
         calls(o);
         check("the owner's own command (\"-\": adb, the app): no question, it runs", "ok wheel heat on", oc.handle("-", "wheel_heat", new String[] { "on" }));
         check("... nothing asked on screen", false, calls(o).contains("ask "));
+        check("guide_lines off changes the owner's guide lines (not an undo): it waits for the owner like on",
+                "refused: waiting for the owner to allow guide_lines for cam (a question is on the screen)", oc.handle("cam", "guide_lines", new String[] { "off" }));
+        check("... the question goes on screen, nothing sent to the car", "ask cam guide_lines", calls(o));
+        check("... its undo (restore) never waits", "ok nothing to restore", oc.handle("cam", "guide_lines", new String[] { "restore" }));
         o.askFirst = false;
         check("asking off (trust_commands): runs", true, oc.handle("other", "wheel_heat", new String[] { "on" }).startsWith("ok"));
         System.exit(fail);

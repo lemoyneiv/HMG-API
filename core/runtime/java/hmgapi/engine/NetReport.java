@@ -167,12 +167,13 @@ final class NetReport {
         return b.toString();
     }
 
+    /** the last n lines of a log, scrubbed like everything else outside the rules */
     static List<Object> tail(File f, int n) {
         List<Object> out = new ArrayList<Object>();
         try {
             if (!f.isFile()) return out;
             String[] ls = Engine.read(f).split("\n");
-            for (int i = Math.max(0, ls.length - n); i < ls.length; i++) out.add(ls[i]);
+            for (int i = Math.max(0, ls.length - n); i < ls.length; i++) out.add(scrub(ls[i]));
         } catch (Exception x) {
             // unreadable: empty
         }

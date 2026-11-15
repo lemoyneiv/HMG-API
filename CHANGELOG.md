@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+### Fixes
+
+- **The Car Report's network keeper log is scrubbed like the rest.** Its last 40 lines
+  went into the report as they were, so an address in one (a mod's route, a phone on the
+  hotspot) could end up in a public issue. MAC addresses, IPv6 interface ids and public
+  IPv4 addresses now come out of them, as they do from the interfaces, routes and logged
+  drops.
+- **Uninstalling gives the boot scripts their stock bytes back.** HMG-API's block was
+  taken out of `install-recovery.sh` and `qb_runtime.sh` by writing every other line
+  again through the shell, which is only close to stock: a last line with no newline
+  gained one, and a shell's `echo` may expand a backslash (the EV6's `qb_runtime.sh` has
+  two). The uninstall now puts the install's backup back byte for byte when nothing else
+  changed the file since; when something did (a NEMESIS install or update rewrites
+  `install-recovery.sh`), only HMG-API's block comes out, as before.
+- **No restart at every start after a rollback that failed part-way.** At boot, an apply
+  that was cut off is rolled back and the head unit restarts once. The restart went by
+  the words "rolled back" in the log, which a rollback that then fails (no space left,
+  say) prints too while keeping its journal, so the unit would have restarted at each
+  start. It now restarts only when the rollback finished; one that didn't is tried again
+  at the next start, and `boot.log` says so.
+- **A mod's native patch recipes are read from its own folder only.** A recipe path that
+  led out of the mod's folder (`../`, an absolute path, a symlink) made that file readable
+  by every app: the owner's settings, another mod's private files. Such paths are left
+  alone now, as they already were for a mod's code JAR.
+- **hmgapid never sets up a service's folders through a symlink.** A service that doesn't
+  run as root owns its folder, and a link put where its `dalvik-cache` goes had hmgapid
+  hand it whatever the link pointed at, at the service's next start.
+- **`mkmodpkg.sh` refuses a mod folder with a signing key in it.** Everything in the
+  folder goes into the signed package, which is public: a key file (`.key`, `.p12`,
+  `.pem`, `.jks`, a PEM private key, or a copy of the author key under any name) now
+  stops the packaging, with the files named.
+- **The app says when over-the-air updates aren't blocked.** The block is one of HMG-API's
+  hooks, so on a car where the hooks don't run (no hook map that fits it, or the boot
+  guard turned them off) the car can still download and install its own updates, while
+  the Updates page said HMG-API blocks them. The page now says they aren't blocked there
+  and points at the car's own switch (Settings > General > Install Infotainment System
+  Updates Automatically). Nothing else changes: HMG-API doesn't touch that switch without
+  its hooks.
+- **Removing or updating a mod never deletes what a symlink in its folder points at.** The
+  engine's delete went into a linked folder (one a mod's script made, to a USB stick or
+  another place under `/data`) and emptied it. A link is now removed as the link it is.
+- **`guide_lines off` waits for the owner's OK like `on`.** A mod's first use of a car
+  command waits for the owner, except when it gives back what it took (release, stop,
+  restore, off). For the rear camera's guide lines, `off` isn't giving back: it turns
+  the owner's lines off, and `restore` is the undo. It ran without asking.
+- **Cars mapped from Car Reports have their make and name.** The Sportage, Telluride,
+  Niro EV, Carnival, Palisade and the Ioniq 5's `NEEV23SE` had a hook map but no line in
+  the engine's model table, so a mod whose `"system"` names a make or a name refused
+  them, and their Car Reports were titled "Car Report: null …". A car HMG-API has no name
+  for yet now goes by its model code there.
+
+## 1.1.0-rc.1 (2026-11-13)
+
+The release candidate: feature freeze. 1.1.0 will be this code unless a blocker turns up.
+
+- **Wireless CarPlay + Android Auto 2.2.0-rc.1** and **ADB 1.0.1-rc.1** come with it
+  (NEMESIS in the app menu 1.1.0 as before). Wireless: Android Auto roundabouts the right
+  way round (wireless #19, #20), "Recalculating…" on a reroute (wireless #21), CarPlay
+  survives a short Wi-Fi stall (wireless #25, #26), Android Auto's maneuvers in the log
+  (wireless #22, #27). ADB: port 5555 opened on the hotspot for adb over it, on cars whose
+  stock firewall drops it (adb #3).
+
 ### Cars
 
 - **Hook maps from Car Reports** (made on owners' cars by HMG-API's own mapper, not yet
@@ -19,6 +81,14 @@
   `LocalSocket`'s `close()` doesn't close its fd, so the vehicle service never ended its
   answer, and it leaked an fd per read, command and light status. It now closes the fd
   itself, and hmgapid takes a whole answer as success even if the connection stays open.
+- **After a firmware update, installing HMG-API again works, and so does uninstalling it**
+  (#166). An update puts the system files back to stock and removes HMG-API's own, but
+  `/data/hmgapi` stays. The uninstall failed (NEMESIS: "Operation failed"), and could have
+  put the old firmware's `app_process` back. Now the install finds the update, drops its
+  backups of the old firmware (`engine firmware-reset`) and starts from the new firmware's
+  files; the uninstall leaves those as they are. The app says what happened instead of
+  "Can't reach hmgapid". Units on 1.0.2 or 1.1.0-beta.1 get out of it by installing this
+  release over the old one.
 
 ### For mod authors
 

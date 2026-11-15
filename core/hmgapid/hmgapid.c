@@ -44,7 +44,7 @@ typedef unsigned int u32;
 typedef unsigned char u8;
 typedef long sl;
 
-#define VERSION "1.1.0-beta.3"
+#define VERSION "1.1.1-rc.1"
 
 #ifndef ROOTDIR
 #define ROOTDIR "/data/hmgapi"
@@ -161,6 +161,8 @@ static long clock_sec(int clk)
 #define x_setresuid(a, b, c) S3(208, a, b, c)
 #define x_setresgid(a, b, c) S3(210, a, b, c)
 #define x_chown(p, u, g) S3(212, p, u, g)
+#define x_fchmod(fd, m) S2(94, fd, m)
+#define x_fchown(fd, u, g) S3(207, fd, u, g)   /* fchown32 */
 #define MS_BIND 4096
 #define MNT_DETACH 2
 
@@ -172,6 +174,7 @@ static long clock_sec(int clk)
 #define O_TRUNC 01000
 #define O_APPEND 02000
 #define O_DIRECTORY 040000
+#define O_NOFOLLOW 0100000   /* ARM's value */
 #define O_CLOEXEC 02000000
 #define EINTR 4
 #define EADDRINUSE 98
@@ -1036,11 +1039,24 @@ static void svc_log(const char *what, struct svc *v, sl n)
     logline(what, l.b, n, 0);
 }
 
+/* A folder with this mode and owner. Never through a symlink: a service's own folder
+   belongs to its user, who could put a link where its dalvik-cache goes, and chmod/chown
+   by path would then hand that user whatever the link points at. Anything there that
+   isn't a folder is taken away and the folder made. */
 static void mkdir_owned(const char *p, int mode, int uid, int gid)
 {
+    sl fd;
     x_mkdir(p, mode);
-    x_chmod(p, mode);
-    if (uid >= 0) x_chown(p, uid, gid);
+    fd = x_open(p, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0);
+    if (fd < 0) {
+        x_unlink(p);
+        if (x_mkdir(p, mode) < 0) return;
+        fd = x_open(p, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0);
+        if (fd < 0) return;
+    }
+    x_fchmod(fd, mode);
+    if (uid >= 0) x_fchown(fd, uid, gid);
+    x_close(fd);
 }
 
 static void write_status(void)

@@ -25,8 +25,9 @@ import java.util.Set;
  * Socket incl. SSL, SocketChannel, HttpURLConnection) refuses anything but
  * loopback. Its native libraries (libvdm*, libotanativeinterface) open no
  * sockets of their own. The stock "Install Infotainment System Updates
- * Automatically" setting (Settings.System gen_auto_update) is turned off too,
- * so nothing installs by itself even with HMG-API's hooks off.
+ * Automatically" setting (Settings.System gen_auto_update) is turned off too
+ * (it stays off afterwards, hooks on or not). All of it needs HMG-API's hooks: on
+ * a car where they never run, nothing is blocked and that setting isn't touched.
  *
  * apply() runs in the launcher process (system uid) at every start; it also
  * re-enables the app if an earlier HMG-API build disabled it.
@@ -95,6 +96,13 @@ final class Updates {
         Points.hook(null, "framework.io_bridge.connect_timeout", block);
         HmgApi.i("updates: OTA client network blocked in " + app.processName);
     }
+
+    /**
+     * With HMG-API's hooks off on a car (no hook map that fits, the boot guard) nothing
+     * here runs: the OTA client keeps its network and the car's own automatic-install
+     * setting is left as the owner has it. The app says so instead of "off".
+     */
+    static final String NOT_BLOCKED = "not blocked (hooks off)";
 
     /** For the HMG-API app. */
     static String state() {

@@ -122,7 +122,7 @@ final class HmgApi {
                             if (!Mods.APP_PACKAGE.equals(Hooks.getObjectField(appInfo, "packageName"))) return;
                             Object app = Hooks.getObjectField(param.thisObject, "mInitialApplication");
                             ClassLoader cl = (ClassLoader) Hooks.callMethod(app, "getClassLoader");
-                            Hooks.findClass("hmgapi.app.HmgApiStatus", cl).getField("json").set(null, Mods.statusJson(Updates.state()));
+                            Hooks.findClass("hmgapi.app.HmgApiStatus", cl).getField("json").set(null, Mods.statusJson(Updates.NOT_BLOCKED));
                         } catch (Throwable t) {
                             e("status for the HMG-API app", t);
                         }

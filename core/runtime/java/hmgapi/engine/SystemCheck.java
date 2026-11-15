@@ -47,11 +47,22 @@ import java.util.TreeSet;
 public final class SystemCheck {
     private SystemCheck() {}
 
-    /** model code -> {make, name}. Owner's hmgapi.json "car" overrides it. */
+    /**
+     * model code -> {make, name}. Owner's hmgapi.json "car" overrides it. Every model with
+     * a hook map (maps/, car.json "products") is here (system-test.sh checks): without its
+     * line a car has no make or name, so a mod's "system" that names one refuses it and
+     * its Car Report has no name to go by.
+     */
     static final String[][] MODELS = {
         {"CVEV", "kia", "EV6"},
         {"NEEV", "hyundai", "Ioniq 5"},
         {"NEEV23", "hyundai", "Ioniq 5"},
+        {"NEEV23SE", "hyundai", "Ioniq 5"},
+        {"LX2PE", "hyundai", "Palisade"},
+        {"NQ5", "kia", "Sportage"},
+        {"ONPE", "kia", "Telluride"},
+        {"SG2EV", "kia", "Niro EV"},
+        {"KA423", "kia", "Carnival"},
         {"DL3", "kia", "K5"},
         {"DL3HEV", "kia", "K5 Hybrid"},
     };

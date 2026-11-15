@@ -74,6 +74,14 @@ o=$(sh $S/mkmodpkg.sh hello $T/author.key 2>&1) || echo "$o"
 check "... building it itself (no HMGAPI_MOD_BUILD) gives the same files" "$(pkg $T/prebuilt.zip)" "$(pkg $M/out/packages/hello-1.0.0.zip)"
 (cd $REPO && tools/mkmodpkg.sh mods/examples/hello $T/author.key > /dev/null)
 check "... and the same files as HMG-API's tools/mkmodpkg.sh" "$(pkg $REPO/out/packages/hello-1.0.0.zip)" "$(pkg $M/out/packages/hello-1.0.0.zip)"
+# a signing key left in the mod's folder never goes into the (public) package
+cp -r hello leaky; cp $T/author.key leaky/notes.txt; mkdir leaky/app2; echo x > leaky/app2/release.p12
+before=$(md5sum < $M/out/packages/hello-1.0.0.zip)
+o=$(HMGAPI_MOD_BUILD=$T/b/hello sh $S/mkmodpkg.sh leaky $T/author.key 2>&1) && r=0 || r=$?
+check "mkmodpkg.sh: a mod folder with keys in it isn't packaged" 1 $r
+check "... it names the author key's copy (whatever its name) and the keystore" "  app2/release.p12|  notes.txt|" "$(echo "$o" | grep '^  ' | tr '\n' '|')"
+check "... and no package was written" "$before" "$(md5sum < $M/out/packages/hello-1.0.0.zip)"
+rm -rf leaky
 cp $M/out/packages/hello-1.0.0.zip $REPO/out/packages/hello-1.0.0.zip   # one package for both NEMESIS builds below
 o=$(sh $S/mknemesismod.sh out/packages/hello-1.0.0.zip 2>&1) || echo "$o"
 check "mknemesismod.sh: ./out/dist" yes "$([ -f $M/out/dist/hello-1.0.0-nemesis-package.zip ] && [ -f $M/out/dist/hello-1.0.0-nemesis.zip ] && echo yes)"

@@ -1,6 +1,6 @@
 # HMG-API: notes for Claude
 
-HMG-API (1.1.0-beta.1) is a mod manager for Hyundai/Kia/Genesis **Gen5W** head units (Telechips TCC803x/TCC897x, Android 4.4.2, Dalvik). It replaces HMG Leafia Plus 1.x (separate, archived repo). It can install through NEMESIS (xwtk/hmg_nemesis, AGPL-3.0), over adb, or with NEMESIS's DSP OTA entry. Repo: `Open-HMG/HMG-API` on GitHub; each mod lives in its own repo there (`Open-HMG/hmgapi-<id>`). Maintainer: VysseCodes (Ko-fi vyssecodes). Reference car: 2023 Kia EV6 (CVEV.USA, firmware 260507, with HUD).
+HMG-API (1.1.0-rc.1) is a mod manager for Hyundai/Kia/Genesis **Gen5W** head units (Telechips TCC803x/TCC897x, Android 4.4.2, Dalvik). It replaces HMG Leafia Plus 1.x (separate, archived repo). It can install through NEMESIS (xwtk/hmg_nemesis, AGPL-3.0), over adb, or with NEMESIS's DSP OTA entry. Repo: `Open-HMG/HMG-API` on GitHub; each mod lives in its own repo there (`Open-HMG/hmgapi-<id>`). Maintainer: VysseCodes (Ko-fi vyssecodes). Reference car: 2023 Kia EV6 (CVEV.USA, firmware 260507, with HUD).
 
 ## Working conventions
 

@@ -66,4 +66,24 @@ eng plan; has "override goes on with a warning" "WARNING: b: needs region KOR" "
 rm -r $R/data/hmgapi/mods/b
 mod c '"all"' '[{"id": "base"}, {"id": "wifi", "system": {"features": ["hmgapi.wifi"]}}]'
 eng plan; has "a part the unit can't run is left out" "c: part wifi left out: needs hmgapi.wifi" "$out"
+
+# a car from a Car Report's map has a make and a name too (a mod's "system" may name them)
+set +e; out=$(HMGAPI_ROOT=$R HMGAPI_PRODUCT=NQ5.USA.0000.V015.012.260507 java -cp "$CP" hmgapi.engine.SystemCheck 2>&1); set -e
+has "a mapped car's make and name (Sportage)" "model NQ5, region USA, firmware 260507, make kia, name Sportage" "$out"
+# ... and every model with a hook map is in the table, with its map's make
+o=$(python3 - <<'PY'
+import glob, json, re
+src = open("core/runtime/java/hmgapi/engine/SystemCheck.java").read()
+table = {m[0]: m[1] for m in re.findall(r'\{"([A-Z0-9]+)", "([a-z]+)", "[^"]+"\}', src.split("MODELS = {")[1].split("};")[0])}
+bad = []
+for f in sorted(glob.glob("maps/*/*/*/*/car.json")):
+    car = json.load(open(f))
+    for p in car["products"]:
+        code = p.split(".")[0]
+        if table.get(code) != car["make"]:
+            bad.append("%s (%s): %s in SystemCheck.MODELS" % (code, f, table.get(code, "not")))
+print("; ".join(bad))
+PY
+)
+if [ -z "$o" ]; then echo "ok    every model with a hook map has its make and name"; else echo "FAIL  models with a map but no line in SystemCheck.MODELS: $o"; fail=1; fi
 exit $fail

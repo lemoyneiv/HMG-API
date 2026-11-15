@@ -101,4 +101,13 @@ eng remove demo; check "remove it" 0 $rc
 check "the override goes with it" "[]" "$(ign)"
 eng install $T/demo.zip --any-car; check "--any-car on a mod for this unit: plain install" 0 $rc
 check "... nothing recorded" "[]" "$(ign)"
+
+# a symlink in a mod's folder (one of its scripts made it: to a USB stick, to another place
+# under /data) goes as the link it is: what it points at stays
+mkdir -p $T/victim/sub; echo keep > $T/victim/sub/file; echo keep > $T/victim/top
+ln -s $T/victim $R/data/hmgapi/mods/demo/link
+ln -s $T/victim/top $R/data/hmgapi/mods/demo/filelink
+eng remove demo; check "remove a mod with symlinks in its folder" 0 $rc
+check "... the mod's folder is gone" no "$([ -e $R/data/hmgapi/mods/demo ] && echo yes || echo no)"
+check "... what the links pointed at is all still there" "keep keep" "$(cat $T/victim/sub/file $T/victim/top 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 exit $fail

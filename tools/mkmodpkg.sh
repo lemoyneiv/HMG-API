@@ -40,6 +40,19 @@ if [ $APPSRC = yes ]; then
     mkdir -p "$W/$ID/$(dirname "$APK")" && cp "$B/$APK" "$W/$ID/$APK" || { echo "no built $APK"; exit 1; }
 fi
 [ -x "$M/build.sh" ] && sh "$M/build.sh" "$W/$ID" >/dev/null
+# Everything in the mod's folder goes into the package, which is public: a signing key
+# left there (the author key itself, an app's keystore) would go out with it, signed.
+LEAK=$(cd "$W/$ID" && {
+    find . -type f \( -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.pem' -o -name '*.jks' -o -name '*.keystore' \)
+    grep -rlE -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' . 2>/dev/null || true   # none: not an error (set -e)
+    find . -type f | while read -r f; do if cmp -s "$f" "$KEY"; then echo "$f"; fi; done
+} | sort -u)
+if [ -n "$LEAK" ]; then
+    echo "mkmodpkg.sh: not packaging $ID: these look like signing keys, and the package is public:"
+    echo "$LEAK" | sed 's#^\./#  #'
+    echo "Keep keys outside the mod's folder."
+    exit 1
+fi
 java -cp "$CP" hmgapi.engine.Signing sign "$W/$ID" "$KEY"
 mkdir -p "$PKGS"
 Z=$PKGS/$ID-$VER.zip
