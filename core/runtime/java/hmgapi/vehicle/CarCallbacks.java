@@ -37,8 +37,26 @@ final class CarCallbacks {
     volatile byte[] sml;
 
     private Listener system, bcm, cluster;
+    private Object datcProxy;
+    private long lastDatcAsk;
     private String lastFailure, lastBcmFailure, lastClusterFailure;   // logged once, not every tick
     private boolean lightAsked;
+
+    static boolean validAmbientF(float f) {
+        return Commands.validAmbientF(f);
+    }
+
+    /**
+     * After STR suspend (QuickBoot), climate and body control's cached push values may be
+     * from a prior drive until CAN wakes up; clear them so stale readings aren't served.
+     */
+    synchronized void onWake() {
+        outsideF10 = Integer.MIN_VALUE;
+        outsideC10 = Integer.MIN_VALUE;
+        wheelHeat = Integer.MIN_VALUE;
+        defogger = Integer.MIN_VALUE;
+        lastDatcAsk = 0;
+    }
 
     /** a binder answering some transactions of one interface */
     abstract static class Listener extends Binder {
@@ -159,6 +177,7 @@ final class CarCallbacks {
         if (system != null && !alive("framework.car_services.datc")) {
             Hub.services.remove("framework.car_services.datc");
             system = null;
+            datcProxy = null;
         }
         if (system == null) {
             try {
@@ -174,6 +193,11 @@ final class CarCallbacks {
                             float f = (Float) Points.call(null, "framework.datc_status.ambient_f", st);
                             float cc = (Float) Points.call(null, "framework.datc_status.ambient_c", st);
                             int stateC = (Integer) Points.call(null, "framework.datc_status.ambient_state_c", st);
+                            if (!validAmbientF(f)) {
+                                outsideF10 = Integer.MIN_VALUE;
+                                outsideC10 = Integer.MIN_VALUE;
+                                return;
+                            }
                             boolean first = outsideF10 == Integer.MIN_VALUE;
                             outsideF10 = Math.round(f * 10);
                             outsideC10 = stateC == 255 ? Integer.MIN_VALUE : Math.round(cc * 10);   // 255: Celsius not valid (a US car)
@@ -183,6 +207,8 @@ final class CarCallbacks {
                     Object proxy = Points.call(null, "framework.datc_listener_stub.as_interface", null, l);
                     Points.call(svc.getClass().getClassLoader(), "framework.datc_service.register_listener", svc, proxy, l);
                     system = l;
+                    datcProxy = proxy;
+                    lastDatcAsk = android.os.SystemClock.elapsedRealtime();
                     lastFailure = null;
                     System.out.println("vehicle: listening to climate control (outside temperature)");
                 }
@@ -191,6 +217,19 @@ final class CarCallbacks {
                 if (!why.equals(lastFailure)) System.out.println("vehicle: climate listener: " + why + " (trying again every few seconds)");
                 lastFailure = why;
                 Hub.services.remove("framework.car_services.datc");
+            }
+        } else if (outsideF10 == Integer.MIN_VALUE && datcProxy != null
+                && android.os.SystemClock.elapsedRealtime() - lastDatcAsk >= 4000) {
+            try {
+                Object svc = Hub.datc();
+                if (svc != null) {
+                    lastDatcAsk = android.os.SystemClock.elapsedRealtime();
+                    Points.call(svc.getClass().getClassLoader(), "framework.datc_service.register_listener", svc, datcProxy, system);
+                }
+            } catch (Throwable t) {
+                Hub.services.remove("framework.car_services.datc");
+                system = null;
+                datcProxy = null;
             }
         }
     }

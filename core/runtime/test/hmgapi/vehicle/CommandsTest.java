@@ -347,6 +347,39 @@ public final class CommandsTest {
         check("... its undo (restore) never waits", "ok nothing to restore", oc.handle("cam", "guide_lines", new String[] { "restore" }));
         o.askFirst = false;
         check("asking off (trust_commands): runs", true, oc.handle("other", "wheel_heat", new String[] { "on" }).startsWith("ok"));
+
+        // routed auto-start to a distant charger waits until <= 18 min before starting the activation timeout
+        FakeCar rc = new FakeCar();
+        rc.model = "NEEV";
+        Commands routed = new Commands(rc);
+        check("routed auto-start 35 min away", "ok conditioning started", routed.handle("egmp", "conditioning", new String[] { "auto-start", "48", "35" }));
+        calls(rc);
+        rc.now += 10 * 60000;
+        routed.tick(declared("egmp conditioning"));
+        check("still waiting at 35 min out after 10 min (BMS waits until closer)", "waiting", routed.conditioningState);
+        calls(rc);
+        routed.handle("egmp", "conditioning", new String[] { "route", "22", "18" });
+        calls(rc);
+        rc.now += 60000;
+        routed.tick(declared("egmp conditioning"));
+        check("entered <= 18 min window: still waiting after 1 min", "waiting", routed.conditioningState);
+        rc.now += 60000;
+        routed.tick(declared("egmp conditioning"));
+        check("entered <= 18 min window: times out after 2 min on Ioniq 5", "timed_out", routed.conditioningState);
+        calls(rc);
+        check("timed out blocks auto-start in same session", true, routed.handle("egmp", "conditioning", new String[] { "auto-start", "10", "10" }).startsWith("refused:"));
+        routed.onNewSession();
+        check("new session (QuickBoot / next drive) clears timeout latch", "ok conditioning started", routed.handle("egmp", "conditioning", new String[] { "auto-start", "10", "10" }));
+        c.onNewSession();
+        check("new session resets once-per-start startup notice guard", "ok startup notice dismissed", c.handle("f82", "startup_notice", new String[] { "dismiss" }));
+
+        // DATC -40.0 F sentinel filter
+        check("DATC -40.0 F sentinel rejected", false, Commands.validAmbientF(-40.0f));
+        check("DATC -40.02 F sentinel rejected", false, Commands.validAmbientF(-40.02f));
+        check("DATC -39.0 F accepted", true, Commands.validAmbientF(-39.0f));
+        check("DATC 28.5 F accepted", true, Commands.validAmbientF(28.5f));
+        check("DATC NaN rejected", false, Commands.validAmbientF(Float.NaN));
+
         System.exit(fail);
     }
 }
