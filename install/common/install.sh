@@ -180,7 +180,7 @@ rm -f "$D/hook/disable"
         echo "file $(sum "$ROOT$f") $f"
     done
 } > "$D/installed.txt"
-cp "$P/uninstall.sh" "$P/lib.sh" "$P/stock.txt" "$P/app-pending.sh" "$P/hook-check.sh" "$P/boot.sh" "$D/" && chmod 700 "$D/uninstall.sh" "$D/app-pending.sh" "$D/hook-check.sh" "$D/boot.sh"
+cp "$P/uninstall.sh" "$P/lib.sh" "$P/stock.txt" "$P/app-pending.sh" "$P/hook-check.sh" "$P/boot.sh" "$P/wake.sh" "$D/" && chmod 700 "$D/uninstall.sh" "$D/app-pending.sh" "$D/hook-check.sh" "$D/boot.sh" "$D/wake.sh"
 # open.sh (NEMESIS Manager's Launch, adb) installs the app from this copy if it's missing, then opens it
 cp "$P/app-open.sh" "$D/open.sh" && chmod 700 "$D/open.sh" || fail "keep open.sh"
 cp "$P/HmgApi.apk" "$D/HmgApi.apk" && chmod 644 "$D/HmgApi.apk" || fail "keep a copy of the app"
@@ -212,20 +212,21 @@ elif [ -z "$ROOT" ]; then
 fi
 
 # the app: pm only takes our signature while sys.boot_completed is 0 (OEM
-# allowlist), so set it for the pm call only. Android down: app-pending.sh puts it
-# in once Android is up (started now, and by the boot hook until it's in).
-# Failed with Android up: kept waiting like that, so the next restart tries again (the boot
-# hook), and NEMESIS Manager's Launch (or open.sh over adb) tries at once.
+# allowlist), so set it for the pm call only. Always pass $D/HmgApi.apk (/data/hmgapi
+# is 0711), never $P/HmgApi.apk (under NEMESIS $P sits inside 0700 /data/nemesis,
+# where DefaultContainerService gets EACCES -> INSTALL_FAILED_INVALID_URI).
+# Android down: app-pending.sh puts it in once Android is up (started now, and by
+# the boot hook until it's in).
 # HMGAPI_TEST_ANDROID: off-car tests take this branch with stand-ins for pm, getprop and am.
 if { [ -z "$ROOT" ] || [ "$HMGAPI_TEST_ANDROID" = 1 ]; } && [ "$(getprop sys.boot_completed)" = 1 ]; then
     setprop sys.boot_completed 0
-    r=$(pm install -r "$P/HmgApi.apk" 2>&1)
+    r=$(pm install -r "$D/HmgApi.apk" 2>&1)
     setprop sys.boot_completed 1
     case "$r" in
         *INCONSISTENT_CERTIFICATES*)
             setprop sys.boot_completed 0
             pm uninstall hmgapi.app >/dev/null 2>&1
-            r=$(pm install -r "$P/HmgApi.apk" 2>&1)
+            r=$(pm install -r "$D/HmgApi.apk" 2>&1)
             setprop sys.boot_completed 1 ;;
     esac
     case "$r" in

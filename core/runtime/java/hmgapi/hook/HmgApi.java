@@ -1,23 +1,15 @@
 package hmgapi.hook;
 
 import android.content.ComponentName;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
-import android.database.Cursor;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * HMG-API's own hooks. In the zygote: load the installed mods (Mods) and hook
@@ -138,8 +130,10 @@ final class HmgApi {
             // each feature hooks one app's points: all of them mapped on this car, or the feature is off
             if ("com.android.launcher3".equals(app.packageName)) {
                 if (Points.need("launcher entries", "launcher")) launcher(app.classLoader);
+                if (app.context != null) LauncherTiles.startLauncherReceiver(app.context);
             } else if ("com.hkmc.system.app.homesetting".equals(app.packageName)) {
                 if (Points.need("menu editor entries", "homesetting")) editor(app.classLoader);
+                if (app.context != null) LauncherTiles.startEditorReceiver(app.context);
             } else if ("com.android.buttonsettings".equals(app.packageName)) {
                 if (Points.need("star key choices", "buttonsettings")) StarKey.settingsScreens(app.classLoader);
             } else if (Panel.PACKAGE.equals(app.packageName)) {
@@ -191,6 +185,8 @@ final class HmgApi {
     static void launcher(ClassLoader cl) throws Exception {
         final ClassLoader loader = cl;
         final Constructor<?> newEntry = Points.ctor(cl, "launcher.menu_entry.new");
+        hookEntryResources();
+        LauncherTiles.hookEntryCtor(cl, "launcher.menu_entry.new");
 
         Points.hook(cl, "launcher.menu_list.load", new MethodHook() {
             @Override
@@ -200,8 +196,9 @@ final class HmgApi {
                 @SuppressWarnings("unchecked")
                 List<Object> list = (List<Object>) Points.get(loader, "launcher.menu_list.items", param.thisObject);
                 if (list == null) return;
+                Object lock = Points.get(loader, "launcher.menu_list.lock", param.thisObject);
                 int added = 0;
-                synchronized (Points.get(loader, "launcher.menu_list.lock", param.thisObject)) {
+                synchronized (lock) {
                     for (Mods.LauncherEntry m : Mods.launcherEntries()) {
                         if (!installed(ctx, m)) continue;
                         list.add(newEntry.newInstance(param.thisObject, ctx, m.packageName, m.className, m.icon,
@@ -209,15 +206,15 @@ final class HmgApi {
                         added++;
                     }
                 }
-                i("launcher: menu list loaded (" + param.getResult() + "), added " + added + ", " + list.size()
-                        + " entries");
+                int hidden = LauncherTiles.onLauncherLoaded(ctx, list, lock);
+                i("launcher: menu list loaded (" + param.getResult() + "), added " + added + ", hid " + hidden
+                        + ", " + list.size() + " visible entries");
                 if (!savedSynced) {   // load() runs on the launcher's background task
                     savedSynced = true;
                     syncSavedMenu(ctx);
                 }
             }
         });
-        hookEntryResources();
         i("launcher: hooked menu list and entry resources");
     }
 
@@ -225,6 +222,8 @@ final class HmgApi {
         final ClassLoader loader = cl;
         final Constructor<?> newEntry = Points.ctor(cl, "homesetting.edit_entry.new");
         final Field cs = Points.field(cl, "homesetting.edit_list.items");
+        hookEntryResources();
+        LauncherTiles.hookEntryCtor(cl, "homesetting.edit_entry.new");
 
         Points.hook(cl, "homesetting.edit_list.load", new MethodHook() {
             @Override
@@ -243,11 +242,11 @@ final class HmgApi {
                         added++;
                     }
                 }
-                i("editor: menu list loaded (" + param.getResult() + "), added " + added + ", " + list.size()
-                        + " entries");
+                int hidden = LauncherTiles.onEditorLoaded(ctx, loader, list);
+                i("editor: menu list loaded (" + param.getResult() + "), added " + added + ", hid " + hidden
+                        + ", " + list.size() + " visible entries");
             }
         });
-        hookEntryResources();
         i("editor: hooked menu list and entry resources");
     }
 
@@ -275,81 +274,13 @@ final class HmgApi {
         return null;
     }
 
-    /** Adds missing entries to each profile's saved menu and empties HMG-API items whose mod is gone. */
+    /** Adds missing entries to each profile's saved menu, hides/restores configured tiles, and empties gone mods. */
     static void syncSavedMenu(Context ctx) {
-        ContentResolver cr = ctx.getContentResolver();
-        Cursor cur = null;
-        try {
-            cur = cr.query(ALL_MENU, null, null, null, null);
-            if (cur == null) return;
-            int userCol = cur.getColumnIndex("userName"), itemsCol = cur.getColumnIndex("menu_items");
-            while (cur.moveToNext()) {
-                String user = cur.getString(userCol);
-                String json = cur.getString(itemsCol);
-                if (user == null || json == null) continue;
-                JSONObject root = new JSONObject(json);
-                JSONArray arr = root.getJSONArray("menuItems");
-                boolean changed = false;
-                Set<String> present = new HashSet<String>();
-                for (int k = 0; k < arr.length(); k++) {
-                    JSONObject it = arr.getJSONObject(k);
-                    int id = it.optInt("itemId", -1);
-                    String cls = it.optString("className");
-                    boolean ours = id >= ITEM_ID_BASE || id == ITEM_ID_LEGACY;
-                    Mods.LauncherEntry m = entryForClass(cls);
-                    if (ours && (m == null || !installed(ctx, m))) {
-                        arr.put(k, emptySlot());
-                        changed = true;
-                        i("saved menu (" + user + "): removed " + cls + " (its mod is gone), slot " + (k + 1));
-                    } else if (m != null) {
-                        present.add(cls);
-                        if (id != itemId(m)) {   // ours, from an earlier build: give it the current id
-                            it.put("itemId", itemId(m));
-                            changed = true;
-                        }
-                    }
-                }
-                for (Mods.LauncherEntry m : Mods.launcherEntries()) {
-                    if (present.contains(m.className) || !installed(ctx, m)) continue;
-                    int empty = -1;
-                    for (int k = 0; k < arr.length() && empty < 0; k++) {
-                        if ("Empty view".equals(arr.getJSONObject(k).optString("packageName"))) empty = k;
-                    }
-                    if (empty < 0) {
-                        i("saved menu (" + user + "): no empty slot for " + m.className);
-                        continue;
-                    }
-                    JSONObject it = new JSONObject();
-                    it.put("packageName", m.packageName);
-                    it.put("itemId", itemId(m));
-                    it.put("className", m.className);
-                    arr.put(empty, it);
-                    changed = true;
-                    i("saved menu (" + user + "): added " + m.className + " in slot " + (empty + 1));
-                }
-                if (changed) {
-                    ContentValues v = new ContentValues();
-                    v.put("menu_items", root.toString());
-                    cr.update(ALL_MENU, v, "userName=?", new String[] { user });
-                }
-            }
-        } catch (Throwable t) {
-            e("saved menu", t);
-        } finally {
-            if (cur != null) cur.close();
-        }
+        LauncherTiles.syncSavedMenu(ctx);
     }
 
     static int itemId(Mods.LauncherEntry m) {
         return ITEM_ID_BASE + Mods.launcherEntries().indexOf(m);
-    }
-
-    static JSONObject emptySlot() throws Exception {
-        JSONObject it = new JSONObject();
-        it.put("packageName", "Empty view");
-        it.put("itemId", 39);
-        it.put("className", "Empty view");
-        return it;
     }
 
     static Mods.LauncherEntry entryForResource(int id) {

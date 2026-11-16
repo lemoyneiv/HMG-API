@@ -42,18 +42,44 @@ public final class Hub {
     static final Map<String, Object> services = new HashMap<String, Object>();
     static final Map<String, String> values = new HashMap<String, String>();
     static final Map<String, Long> readAt = new HashMap<String, Long>();
+    static final java.io.File WAKE_FILE = new java.io.File("/data/hmgapi/public/wake");
     static long lastSleepGap = Long.MIN_VALUE;
+    static long lastWakeSeq = Long.MIN_VALUE;
     static int lastReady = -1;
 
+    static long readWakeSeq() {
+        if (!WAKE_FILE.isFile()) return 0L;
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(WAKE_FILE);
+            byte[] b = new byte[32];
+            int n = in.read(b);
+            if (n <= 0) return 0L;
+            return Long.parseLong(new String(b, 0, n, "UTF-8").trim());
+        } catch (Throwable ignored) {
+            return 0L;
+        } finally {
+            if (in != null) try { in.close(); } catch (Throwable ignored) {}
+        }
+    }
+
     /**
-     * Detects QuickBoot STR resume (elapsedRealtime advances while uptimeMillis freezes)
-     * and drive-end transitions (EV_RDY 1 -> 0) so per-start command guards and pushed
-     * climate readings never carry stale values across drives.
+     * Detects QuickBoot STR resume (elapsedRealtime advances while uptimeMillis freezes,
+     * or wake.sh increments /data/hmgapi/public/wake) and drive-end transitions
+     * (EV_RDY 1 -> 0) so per-start command guards and pushed climate readings never
+     * carry stale values across drives.
      */
     static synchronized boolean checkSession() {
         long sleepGap = android.os.SystemClock.elapsedRealtime() - android.os.SystemClock.uptimeMillis();
-        boolean woke = lastSleepGap != Long.MIN_VALUE && sleepGap - lastSleepGap >= 5000;
+        long wakeSeq = readWakeSeq();
+        if (lastSleepGap == Long.MIN_VALUE) {
+            lastSleepGap = sleepGap;
+            lastWakeSeq = wakeSeq;
+            return false;
+        }
+        boolean woke = (sleepGap - lastSleepGap >= 3000) || (wakeSeq > lastWakeSeq);
         lastSleepGap = sleepGap;
+        lastWakeSeq = wakeSeq;
         if (woke) {
             System.out.println("vehicle: system resumed from suspend; refreshing session state");
             values.clear();
@@ -463,17 +489,27 @@ public final class Hub {
 
         public void setGuideLines(int state) { run(get("pgs"), "framework.pgs_service.request_guide_lines", state); }
 
+        private final java.util.concurrent.atomic.AtomicInteger noticeGen = new java.util.concurrent.atomic.AtomicInteger();
+
         public void hideStartupNotice() {
+            final int gen = noticeGen.incrementAndGet();
             run(get("factory"), "framework.factory_service.hide_consent_screen");
-            new Thread("startup-notice-confirm") {
+            Thread t = new Thread("startup-notice-confirm") {
                 @Override
                 public void run() {
-                    pause(2500);
-                    try {
-                        if (park()) CarServices.run(get("factory"), "framework.factory_service.hide_consent_screen");
-                    } catch (Throwable ignored) {}
+                    long[] gaps = { 150, 250, 400, 700, 1100 };
+                    for (long g : gaps) {
+                        pause(g);
+                        if (noticeGen.get() != gen) return;
+                        try {
+                            if (!park()) return;
+                            CarServices.run(get("factory"), "framework.factory_service.hide_consent_screen");
+                        } catch (Throwable ignored) {}
+                    }
                 }
-            }.start();
+            };
+            t.setDaemon(true);
+            t.start();
         }
 
         public boolean noticeAllowed() { return new java.io.File("/data/hmgapi/settings/allow/startup_notice").isFile(); }   // hmgapid allow

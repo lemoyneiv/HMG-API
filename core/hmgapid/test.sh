@@ -125,6 +125,8 @@ check "app: sh refused" "13" "$(code app sh 'echo no')"
 check "app: remount refused" "13" "$(code app remount rw)"
 check "app: reboot allowed" "0" "$(code app reboot)"
 check "app: engine allowed" "0" "$(code app engine status)"
+check "app: engine launcher-tiles allowed" "0" "$(code app engine launcher-tiles)"
+check "app: engine launcher-tiles-set allowed" "0" "$(code app engine launcher-tiles-set '{}')"
 
 # --- anyone else
 check "other: ping" "ok" "$(run other ping)"
@@ -326,6 +328,10 @@ check "a second boot returns at once too" "yes|" "$([ $(( $(date +%s) - t0 )) -l
 waitfor 'grep -q done "$B/ran"' || true
 check "... and doesn't run boot.sh again" "ran done" "$(cat "$B/ran" | tr '\n' ' ' | sed 's/ $//')"
 has "... boot.sh logged in hmgapid.log" "boot: running boot.sh" "$(cat "$B/root/hmgapid.log")"
+printf 'echo woke >> "%s/woke"\n' "$B" > "$B/root/wake.sh"
+"$B/hmgapid" boot >/dev/null 2>&1
+waitfor '[ -f "$B/woke" ]' || true
+check "subsequent boot runs wake.sh without re-running boot.sh" "woke|ran done" "$(cat "$B/woke" 2>/dev/null)|$(cat "$B/ran" | tr '\n' ' ' | sed 's/ $//')"
 check "boot takes no arguments" "2" "$(code boot boot extra)"
 # no daemon yet (the zygote wrapper didn't start one): boot starts it, and runs boot.sh
 build boot2 "$ME" ""

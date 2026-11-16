@@ -91,6 +91,11 @@ if [ -z "$ROOT" ] && [ "$(getprop sys.boot_completed)" = 1 ]; then
         IFS=$o
         settings put system $k "$n" && log "side panel: HMG-API's page out of $k"
     done
+    if [ -f "$D/settings/launcher-tiles.json" ]; then
+        /system/bin/hmgapid ping >/dev/null 2>&1 || /system/bin/hmgapid daemon >/dev/null 2>&1
+        /system/bin/hmgapid engine launcher-tiles-set '{"compact_gaps":false,"hidden":[]}' >/dev/null 2>&1 && sleep 2
+        log "home screen: restored any hidden stock tiles"
+    fi
 fi
 
 # mods' services stop (hmgapid keeps running until the restart; an empty list stops them)
@@ -152,7 +157,7 @@ if [ -z "$ROOT" ]; then
     done
     [ -s "$D/state/apps.installed" ] && : > "$D/state/apps.alloff"   # a reinstall turns them on again
 fi
-rm -f "$D/installed.txt" "$D/hook/enable" "$D/public/HmgApi.apk" "$D/HmgApi.apk" "$D/open.sh" "$D/hook-check.sh" "$D/boot.sh"
+rm -f "$D/installed.txt" "$D/hook/enable" "$D/public/HmgApi.apk" "$D/public/wake" "$D/public/launcher-tiles.json" "$D/HmgApi.apk" "$D/open.sh" "$D/hook-check.sh" "$D/boot.sh" "$D/wake.sh" "$D/wake.log"
 
 # 6. NEMESIS's package list: HMG-API and its mods off it too, the mods first (they depend on
 # HMG-API's package). HMGAPI_NEMESIS_SYNC=1: their scripts only unlist (refreshed first: an

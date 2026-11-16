@@ -44,7 +44,7 @@ typedef unsigned int u32;
 typedef unsigned char u8;
 typedef long sl;
 
-#define VERSION "1.1.1-rc.1"
+#define VERSION "1.1.1-rc.2"
 
 #ifndef ROOTDIR
 #define ROOTDIR "/data/hmgapi"
@@ -635,9 +635,10 @@ static int op_engine(int fd, int argc, char **argv)
     if (!(seq(sub, "plan") || seq(sub, "apply") || seq(sub, "keep") || seq(sub, "restore") || seq(sub, "status")
           || seq(sub, "recover") || seq(sub, "install") || seq(sub, "remove") || seq(sub, "map") || seq(sub, "verify-map")
           || seq(sub, "usb-scan") || seq(sub, "update-hmgapi") || seq(sub, "apps") || seq(sub, "probe")
-          || seq(sub, "map-car") || seq(sub, "report") || seq(sub, "nemesis-sync"))) {
+          || seq(sub, "map-car") || seq(sub, "report") || seq(sub, "nemesis-sync")
+          || seq(sub, "launcher-tiles") || seq(sub, "launcher-tiles-set"))) {
         say(fd, "usage: engine plan | apply [--trial] [--force] | keep | restore | status | recover | install <zip> | remove <id>"
-                " | nemesis-sync | map | map-car [--write] | verify-map | report [--usb]\n");
+                " | nemesis-sync | map | map-car [--write] | verify-map | report [--usb] | launcher-tiles | launcher-tiles-set <json>\n");
         return 2;
     }
     a[n++] = APP_PROCESS;
@@ -1362,7 +1363,7 @@ static void svc_tick(void)
     int i;
     if (now == last) return;
     last = now;
-    if (!android_up && now - last_android_check >= 5) {
+    if (!android_up && now - last_android_check >= 1) {
         char v[16];
         char *a[] = { GETPROP, "sys.boot_completed", 0 };
         last_android_check = now;
@@ -1373,15 +1374,6 @@ static void svc_tick(void)
     }
     svc_reload(now);
     svc_ctl(now);
-    /* the mods' apps, when the list changes (or first after Android is up) */
-    if (android_up) {
-        if (read_small(ROOTDIR "/state/apps.txt", apps, sizeof apps) < 0) apps[0] = 0;
-        if (apps_sync_pending || !seq(apps, apps_synced)) {
-            if (apps[0] || exists(ROOTDIR "/state/apps.json")) apps_sync();
-            mcpy(apps_synced, apps, slen(apps) + 1);
-            apps_sync_pending = 0;
-        }
-    }
     for (i = 0; i < nsvc; i++) {
         struct svc *v = &svcs[i];
         if (v->pid > 0 && v->kill_at && now >= v->kill_at) { x_kill(-v->pid, SIGKILL); x_kill(v->pid, SIGKILL); v->kill_at = 0; }
@@ -1396,6 +1388,15 @@ static void svc_tick(void)
         if (v->state == S_WAIT && v->pid == 0 && v->next && now >= v->next && (seq(v->f[3], "boot") || android_up)) svc_start(v, now);
     }
     if (status_dirty) write_status();
+    /* the mods' apps, when the list changes (or first after Android is up) */
+    if (android_up) {
+        if (read_small(ROOTDIR "/state/apps.txt", apps, sizeof apps) < 0) apps[0] = 0;
+        if (apps_sync_pending || !seq(apps, apps_synced)) {
+            if (apps[0] || exists(ROOTDIR "/state/apps.json")) apps_sync();
+            mcpy(apps_synced, apps, slen(apps) + 1);
+            apps_sync_pending = 0;
+        }
+    }
 }
 
 /* ops on services, from workers: a request file the daemon picks up within a second */
@@ -1926,7 +1927,15 @@ static int boot_main(void)
     for (i = 3; i < 1024; i++) x_close(i);
     if (daemon_main() != 0) x_exit(0);
     f = x_open(BOOTMARK, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-    if (f < 0) x_exit(0);   /* another trigger ran boot.sh this boot */
+    if (f < 0) {   /* another trigger ran boot.sh this boot (or QuickBoot STR resume re-ran init hooks) */
+        if (exists(ROOTDIR "/wake.sh")) {
+            static char *wa[] = { SH, ROOTDIR "/wake.sh", 0 };
+            f = x_open(ROOTDIR "/wake.log", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+            if (f >= 0) { x_dup2(f, 1); x_dup2(f, 2); if (f > 2) x_close(f); }
+            x_execve(wa[0], wa, g_env);
+        }
+        x_exit(0);
+    }
     x_close(f);
     f = x_open(ROOTDIR "/boot.log", O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (f >= 0) { x_dup2(f, 1); x_dup2(f, 2); if (f > 2) x_close(f); }

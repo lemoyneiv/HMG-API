@@ -21,10 +21,19 @@ import java.io.FileInputStream;
  * (allow <name>).
  */
 final class SettingsTab {
-    static final String[] CATS = { "Vehicle", "Updates", "Phone projection", "Hook map", "About" };
+    static final String[] CATS = { "Vehicle", "Home screen", "Updates", "Phone projection", "Hook map", "About" };
     final MainActivity a;
     LinearLayout cats, page;
     static int current;   // the category shown last, kept while the app runs
+
+    static void selectCategory(String name) {
+        for (int i = 0; i < CATS.length; i++) {
+            if (CATS[i].equalsIgnoreCase(name)) {
+                current = i;
+                return;
+            }
+        }
+    }
 
     SettingsTab(MainActivity a) {
         this.a = a;
@@ -46,6 +55,7 @@ final class SettingsTab {
     }
 
     void show(int n) {
+        if (n < 0 || n >= CATS.length) n = 0;
         current = n;
         cats.removeAllViews();
         for (int i = 0; i < CATS.length; i++) {
@@ -63,9 +73,10 @@ final class SettingsTab {
         page.removeAllViews();
         Ui.text(page, CATS[n], 28, true, Ui.TEXT);
         if (n == 0) vehicle();
-        else if (n == 1) updates();
-        else if (n == 2) projection();
-        else if (n == 3) hookMap();
+        else if (n == 1) homeScreen();
+        else if (n == 2) updates();
+        else if (n == 3) projection();
+        else if (n == 4) hookMap();
         else about();
     }
 
@@ -104,6 +115,266 @@ final class SettingsTab {
         owner("Ambient light", "Mods that change the ambient light put your colour or theme and brightness back when they let "
                 + "go; a change you make in the car's menu becomes the one they put back. Turn this on to keep every mod off the light.",
                 "Block mod light control", "block_ambient_light", false, null);
+    }
+
+    private final Object tileSaveLock = new Object();
+    private String pendingTileJson;
+    private boolean tileSaving;
+
+    void homeScreen() {
+        Ui.text(page, "Choose which system apps and mod packages appear on the home screen launcher. Changes apply live "
+                + "without restarting the head unit; hidden stock tiles are backed up and restored when turned back on.",
+                16, false, Ui.GREY);
+        final TextView status = Ui.text(page, "Loading home screen tiles…", 16, false, Ui.GREY);
+        final LinearLayout body = Ui.column(a);
+        page.addView(body);
+
+        new Ui.Job<Hmgapid.Result>() {
+            @Override
+            Hmgapid.Result work() throws Exception {
+                return Hmgapid.call("engine", "launcher-tiles");
+            }
+
+            @Override
+            void done(Hmgapid.Result r, Exception e) {
+                body.removeAllViews();
+                if (e != null || r == null || r.code != 0) {
+                    status.setTextColor(Ui.ERROR);
+                    status.setText(e != null ? Hmgapid.unreachable(e) : r.output.trim());
+                    return;
+                }
+                try {
+                    JSONObject doc = new JSONObject(r.output);
+                    final boolean[] compact = { doc.optBoolean("compact_gaps", true) };
+                    final java.util.Set<String> hidden = new java.util.LinkedHashSet<String>();
+                    JSONArray hArr = doc.optJSONArray("hidden");
+                    if (hArr != null) {
+                        for (int i = 0; i < hArr.length(); i++) {
+                            String k = hArr.optString(i);
+                            if (k != null && !k.isEmpty()) hidden.add(k);
+                        }
+                    }
+                    final JSONArray tiles = doc.optJSONArray("tiles");
+                    final int total = tiles == null ? 0 : tiles.length();
+                    final boolean[] suppress = { false };
+                    final java.util.Map<String, Switch> switches = new java.util.LinkedHashMap<String, Switch>();
+
+                    final Runnable updateSummary = new Runnable() {
+                        @Override
+                        public void run() {
+                            int vis = 0;
+                            if (tiles != null) {
+                                for (int i = 0; i < tiles.length(); i++) {
+                                    JSONObject t = tiles.optJSONObject(i);
+                                    if (t != null && !hidden.contains(t.optString("key"))) vis++;
+                                }
+                            }
+                            status.setTextColor(Ui.GREEN);
+                            status.setText(total > 0
+                                    ? ("Showing " + vis + " of " + total + " tiles  ·  " + hidden.size() + " hidden")
+                                    : "Open the home screen once so HMG-API can read this car's tiles.");
+                        }
+                    };
+
+                    final Runnable triggerSave = new Runnable() {
+                        @Override
+                        public void run() {
+                            saveTiles(compact[0], hidden, status, updateSummary);
+                        }
+                    };
+
+                    Switch gapSw = Ui.switchRow(body, "Close empty gaps between tiles");
+                    gapSw.setChecked(compact[0]);
+                    gapSw.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                        public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                            if (suppress[0]) return;
+                            compact[0] = checked;
+                            triggerSave.run();
+                        }
+                    });
+
+                    LinearLayout actions = Ui.row(a);
+                    Ui.button(actions, "Show all tiles", new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            if (hidden.isEmpty()) return;
+                            suppress[0] = true;
+                            hidden.clear();
+                            for (Switch sw : switches.values()) sw.setChecked(true);
+                            suppress[0] = false;
+                            triggerSave.run();
+                        }
+                    });
+                    body.addView(actions);
+                    Ui.line(body);
+
+                    if (tiles == null || tiles.length() == 0) {
+                        updateSummary.run();
+                        return;
+                    }
+
+                    java.util.List<JSONObject> pkgTiles = new java.util.ArrayList<JSONObject>();
+                    java.util.List<JSONObject> sysTiles = new java.util.ArrayList<JSONObject>();
+                    for (int i = 0; i < tiles.length(); i++) {
+                        JSONObject t = tiles.optJSONObject(i);
+                        if (t == null) continue;
+                        if ("package".equals(t.optString("kind"))) pkgTiles.add(t);
+                        else sysTiles.add(t);
+                    }
+
+                    if (!pkgTiles.isEmpty()) {
+                        Ui.text(body, "Packages & mods", 21, true, Ui.TEXT);
+                        for (JSONObject t : pkgTiles) addTileSwitch(body, t, hidden, switches, suppress, triggerSave);
+                        Ui.line(body);
+                    }
+                    if (!sysTiles.isEmpty()) {
+                        Ui.text(body, "System apps", 21, true, Ui.TEXT);
+                        for (JSONObject t : sysTiles) addTileSwitch(body, t, hidden, switches, suppress, triggerSave);
+                    }
+                    updateSummary.run();
+                } catch (Exception ex) {
+                    status.setTextColor(Ui.ERROR);
+                    status.setText("Couldn't read home screen tiles: " + ex.getMessage());
+                }
+            }
+        }.start(a);
+    }
+
+    private void addTileSwitch(LinearLayout parent, JSONObject tile, final java.util.Set<String> hidden,
+            java.util.Map<String, Switch> switches, final boolean[] suppress, final Runnable triggerSave) {
+        final String key = tile.optString("key");
+        final String title = tile.optString("title", key);
+        final String pkg = tile.optString("packageName");
+        String mod = tile.optString("mod", "");
+
+        LinearLayout row = Ui.row(a);
+        LinearLayout labels = Ui.column(a);
+        TextView nameView = new TextView(a);
+        nameView.setText(title);
+        Ui.size(nameView, 19);
+        nameView.setTextColor(Ui.TEXT);
+        labels.addView(nameView);
+
+        TextView subView = new TextView(a);
+        subView.setText(!mod.isEmpty() && !mod.equals(pkg) ? (mod + "  ·  " + pkg) : pkg);
+        Ui.size(subView, 14);
+        subView.setTextColor(Ui.GREY);
+        labels.addView(subView);
+
+        row.addView(labels, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        final Switch sw = new Switch(a);
+        sw.setChecked(!hidden.contains(key));
+        row.addView(sw);
+        row.setPadding(0, Ui.dp(a, 6), 0, Ui.dp(a, 6));
+        parent.addView(row);
+        switches.put(key, sw);
+
+        sw.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                if (suppress[0]) return;
+                if (!checked && ("hmgapi.app".equals(pkg) || "com.android.settings".equals(pkg))) {
+                    String msg = "hmgapi.app".equals(pkg)
+                            ? "You can still open HMG-API from NEMESIS, a ★ button shortcut, or Comfort's Home Screen Tiles button."
+                            : "Setup opens the car's stock settings menu. Make sure your physical Setup button works before hiding its tile.";
+                    new AlertDialog.Builder(a)
+                            .setTitle("Hide " + title + "?")
+                            .setMessage(msg)
+                            .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int w) {
+                                    suppress[0] = true;
+                                    sw.setChecked(true);
+                                    suppress[0] = false;
+                                }
+                            })
+                            .setPositiveButton("Hide tile", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int w) {
+                                    hidden.add(key);
+                                    triggerSave.run();
+                                }
+                            })
+                            .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                                @Override
+                                public void onCancel(DialogInterface d) {
+                                    suppress[0] = true;
+                                    sw.setChecked(true);
+                                    suppress[0] = false;
+                                }
+                            })
+                            .show();
+                    return;
+                }
+                if (checked) hidden.remove(key);
+                else hidden.add(key);
+                triggerSave.run();
+            }
+        });
+    }
+
+    private void saveTiles(boolean compactGaps, java.util.Set<String> hidden, final TextView status, final Runnable onDone) {
+        final String payload;
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("compact_gaps", compactGaps);
+            JSONArray arr = new JSONArray();
+            for (String k : hidden) arr.put(k);
+            obj.put("hidden", arr);
+            payload = obj.toString();
+        } catch (Exception e) {
+            return;
+        }
+        status.setTextColor(Ui.GREY);
+        status.setText("Applying to home screen…");
+        synchronized (tileSaveLock) {
+            pendingTileJson = payload;
+            if (tileSaving) return;
+            tileSaving = true;
+        }
+        new Thread("hmgapi-tiles-save") {
+            @Override
+            public void run() {
+                Hmgapid.Result last = null;
+                Exception lastErr = null;
+                while (true) {
+                    String next;
+                    synchronized (tileSaveLock) {
+                        next = pendingTileJson;
+                        pendingTileJson = null;
+                    }
+                    if (next == null) break;
+                    try {
+                        last = Hmgapid.call("engine", "launcher-tiles-set", next);
+                        lastErr = null;
+                    } catch (Exception ex) {
+                        lastErr = ex;
+                    }
+                    synchronized (tileSaveLock) {
+                        if (pendingTileJson == null) {
+                            tileSaving = false;
+                            break;
+                        }
+                    }
+                }
+                final Hmgapid.Result fr = last;
+                final Exception fe = lastErr;
+                a.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (a.isFinishing()) return;
+                        if (fe != null || fr == null || fr.code != 0) {
+                            status.setTextColor(Ui.ERROR);
+                            status.setText("Couldn't save home screen tiles: "
+                                    + (fe != null ? fe.getMessage() : fr != null ? fr.output.trim() : "unknown error"));
+                        } else {
+                            onDone.run();
+                        }
+                    }
+                });
+            }
+        }.start();
     }
 
     /** Are HMG-API's hooks running on this car? The update block is one of them. */

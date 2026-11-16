@@ -111,6 +111,7 @@ final class LiveState {
         traversable(modsDir);
         pub.setReadable(true, false);
         pub.setExecutable(true, false);
+        LauncherTilesStore.publishPublicConfig(e);
         if (e.host) {
             e.hostAction("broadcast " + ACTION);
         } else {
