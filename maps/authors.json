@@ -13,12 +13,13 @@
       ]
     },
     "28ad71e0-07c0-8e61-8bf3-380cc71f9280": {
-      "name": "Kyle",
-      "projects": "Gen5W Suite, hmgapi-comfort, Brake Light Indicator, OBD Gen5W, Light Vibes, FitcamX Gen5W",
+      "name": "lemoyneiv",
+      "projects": "Gen5W Suite, Comfort & Startup (hmgapi-comfort), Brake Light Indicator, Light Vibes (intense-effects), HMG-API BLE & Home Screen Tiles",
       "repos": [
         "https://github.com/lemoyneiv/HMG-API",
         "https://github.com/lemoyneiv/gen5w-suite",
-        "https://github.com/lemoyneiv/brake-indicator-gen5w"
+        "https://github.com/lemoyneiv/brake-indicator-gen5w",
+        "https://github.com/lemoyneiv/light-vibes"
       ]
     }
   }

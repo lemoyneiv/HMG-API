@@ -536,7 +536,9 @@ final class SettingsTab {
             v = "?";
         }
         fact("HMG-API", v);
+        fact("Authors", "VysseCodes, lemoyneiv");
         fact("License", "AGPL-3.0 (mods have their own)");
+        fact("Suite fork", "github.com/lemoyneiv/HMG-API");
         fact("Source and help", "github.com/Open-HMG/HMG-API");
         fact("Guides", "github.com/Open-HMG/HMG-API/wiki");
         fact("Support the project", "github.com/Open-HMG/HMG-API/wiki/Support");
