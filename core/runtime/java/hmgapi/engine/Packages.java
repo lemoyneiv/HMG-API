@@ -146,7 +146,7 @@ final class Packages {
             return refuse(v, v.id + " " + v.version + " needs HMG-API " + need + " (this is " + Engine.HMGAPI_VERSION + ")");
         }
         Map<String, Object> car = (Map<String, Object>) e.hmgapi.get("car");
-        String sys = SystemCheck.check(mod.get("system"), new SystemCheck.Facts(e.root, car));
+        String sys = SystemCheck.check(mod.get("system"), new SystemCheck.Facts(e.root, car), SystemCheck.asksHotspot(mod));
         if (sys != null) {
             v.otherCar = sys;
             if (SystemCheck.ignored(e.hmgapi, v.id) || anyCar) {

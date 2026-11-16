@@ -253,7 +253,8 @@ chmod +x "$B/"*
 mkdir -p "$D/logs/hmgapi"
 printf '11-14 08:00:01 route 203.0.113.77 via wlan0\n11-14 08:00:02 peer 0c:1d:2e:3f:4a:5b fe80::e1d:2eff:fe3f:4a5b\n11-14 08:00:03 hotspot 192.168.0.1 up\n' > "$D/logs/hmgapi/net.log"
 set +e
-out=$(PATH=$B:$PATH HMGAPI_ROOT=$R HMGAPI_HOST=1 HMGAPI_TEST_ANY_CAR=1 HMGAPI_PRODUCT=CEEV.USA.0000.V015 HMGAPI_PROPS="init.svc.iptrules=stopped" java -cp "$CP" hmgapi.engine.Engine report 2>&1); rc=$?
+# ZZEV: a model code no car has (CEEV, used before, is the Ioniq 6 since its map came in)
+out=$(PATH=$B:$PATH HMGAPI_ROOT=$R HMGAPI_HOST=1 HMGAPI_TEST_ANY_CAR=1 HMGAPI_PRODUCT=ZZEV.USA.0000.V015 HMGAPI_PROPS="init.svc.iptrules=stopped" java -cp "$CP" hmgapi.engine.Engine report 2>&1); rc=$?
 set -e
 check "report runs" 0 $rc
 has "report: network summary for the owner" "network: firewall iptrules (stopped); IPv4 input DROP, 2 chains" "$out"
@@ -275,7 +276,7 @@ has "report: keeper log, ... cut to its network" "route 203.0.x.x via wlan0" "$j
 hasnt "report: keeper log, no MAC" "0c:1d:2e" "$j"
 hasnt "report: keeper log, no address made from a MAC" "4a5b" "$j"
 has "report: sysctl" "\"net.ipv4.ip_forward\": \"0\"" "$j"
-has "report: a car HMG-API has no name for goes by its model code" "# Car Report: CEEV USA" "$(cat "$D"/public/reports/*.md)"
-has "... in the issue's title too (never \"null\")" "title=Car+Report%3A+CEEV+USA" "$out"
+has "report: a car HMG-API has no name for goes by its model code" "# Car Report: ZZEV USA" "$(cat "$D"/public/reports/*.md)"
+has "... in the issue's title too (never \"null\")" "title=Car+Report%3A+ZZEV+USA" "$out"
 has "report: markdown has the network" "## Network" "$(cat "$D"/public/reports/*.md)"
 exit $fail

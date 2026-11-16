@@ -212,33 +212,34 @@ elif [ -z "$ROOT" ]; then
 fi
 
 # the app: pm only takes our signature while sys.boot_completed is 0 (OEM
-# allowlist), so set it for the pm call only. Always pass $D/HmgApi.apk (/data/hmgapi
-# is 0711), never $P/HmgApi.apk (under NEMESIS $P sits inside 0700 /data/nemesis,
-# where DefaultContainerService gets EACCES -> INSTALL_FAILED_INVALID_URI).
-# Android down: app-pending.sh puts it in once Android is up (started now, and by
-# the boot hook until it's in).
+# allowlist), so set it for the pm call only. Android down: app-pending.sh puts it
+# in once Android is up (started now, and by the boot hook until it's in).
+# Failed with Android up: kept waiting like that, so the next restart tries again (the boot
+# hook), and NEMESIS Manager's Launch (or open.sh over adb) tries at once.
+# pm installs from public/ (644): the package manager reads the file through a helper
+# that isn't root, and $P can be root-only (the USB installer stages it with umask 077,
+# and NEMESIS stages inside 0700 /data/nemesis: INSTALL_FAILED_INVALID_URI, #187).
 # HMGAPI_TEST_ANDROID: off-car tests take this branch with stand-ins for pm, getprop and am.
+cp "$P/HmgApi.apk" "$D/public/HmgApi.apk" && chmod 644 "$D/public/HmgApi.apk" || fail "keep the app for later"
 if { [ -z "$ROOT" ] || [ "$HMGAPI_TEST_ANDROID" = 1 ]; } && [ "$(getprop sys.boot_completed)" = 1 ]; then
     setprop sys.boot_completed 0
-    r=$(pm install -r "$D/HmgApi.apk" 2>&1)
+    r=$(pm install -r "$D/public/HmgApi.apk" 2>&1)
     setprop sys.boot_completed 1
     case "$r" in
         *INCONSISTENT_CERTIFICATES*)
             setprop sys.boot_completed 0
             pm uninstall hmgapi.app >/dev/null 2>&1
-            r=$(pm install -r "$D/HmgApi.apk" 2>&1)
+            r=$(pm install -r "$D/public/HmgApi.apk" 2>&1)
             setprop sys.boot_completed 1 ;;
     esac
     case "$r" in
         *Success*) rm -f "$D/public/HmgApi.apk"; log "installed the HMG-API app" ;;
         *)
-            cp "$P/HmgApi.apk" "$D/public/HmgApi.apk" && chmod 644 "$D/public/HmgApi.apk"
             log "WARNING: the HMG-API app didn't install: $r. It's tried again at the next restart; or NEMESIS Manager > HMG-API > Launch, or over adb: hmgapid sh 'sh /data/hmgapi/open.sh'"
             t="HMG-API: the app didn't install. Restart the head unit to try again, or use Launch in NEMESIS Manager."
             am broadcast -a com.hkmc.intent.action.TOAST -e com.hkmc.intent.extra.TOAST_MESSAGE "$t" --ez com.hkmc.intent.extra.TOAST_POPUPSHOWING true >/dev/null 2>&1 ;;
     esac
 else
-    cp "$P/HmgApi.apk" "$D/public/HmgApi.apk" && chmod 644 "$D/public/HmgApi.apk" || fail "keep the app for later"
     [ -n "$ROOT" ] || /system/bin/hmgapid sh "sh /data/hmgapi/app-pending.sh </dev/null >/dev/null 2>&1 &" >/dev/null 2>&1
     log "Android isn't up: the HMG-API app installs by itself once it is"
 fi

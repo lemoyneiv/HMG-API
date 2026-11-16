@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Make a car's hook map from Car Reports (the map the car made of itself).
 
-usage: report-map.py <car-report.json>... [--maps DIR] [--status probed] [--make M --name N]
+usage: report-map.py <car-report.json>... [--maps DIR] [--status probed]
+                     [--make hyundai] [--name "Ioniq 6"]
 
 Each report holds the on-car mapper's result ("map_car": points, the md5 of every
 file the names came from, what it didn't find). Give one or more reports from the
@@ -9,12 +10,63 @@ same model, region and firmware: their points must agree, and every file md5 mus
 the same in a majority of them (a car whose apps were changed by another package
 reports other md5s; it's outvoted, and named). Writes
 maps/<make>/<model>/<region>/<firmware>/ in map-car.py's format, status "probed".
-Names and md5s only: nothing else from the reports is kept.
+Use --make when an older HMG-API did not know the model's make; --name can supply
+its display name. Names and md5s only: nothing else from the reports is kept.
 """
-import argparse, collections, json, os, sys
+import argparse, collections, glob, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import maplib  # noqa: E402
+
+
+def mapping(value, label):
+    if not isinstance(value, dict):
+        sys.exit('%s: expected an object' % label)
+    return value
+
+
+def identity(unit, make, label):
+    make = make or unit.get('make')
+    if not isinstance(make, str) or make.lower() not in ('hyundai', 'kia', 'genesis'):
+        sys.exit('%s: unknown make %r; supply --make hyundai, kia or genesis' % (label, make))
+    result = [make.lower()]
+    for key in ('model', 'region', 'firmware'):
+        value = unit.get(key)
+        if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', value):
+            sys.exit('%s: invalid or missing unit.%s' % (label, key))
+        result.append(value)
+    return tuple(result)
+
+
+def missing_points(mc, label):
+    # Car Reports use not_found; older mapper-shaped reports used missing.
+    missing = {}
+    for key in ('missing', 'not_found'):
+        for pid, reason in mapping(mc.get(key, {}), '%s: map_car.%s' % (label, key)).items():
+            if not isinstance(reason, str) or not reason:
+                sys.exit('%s: no reason for missing point %s' % (label, pid))
+            missing[pid] = reason
+    # Report.java groups missing stock files by app, rather than repeating the
+    # reason for each point. Restore those entries for car.json/check-maps.py.
+    absent = mapping(mc.get('apps_absent', {}), '%s: map_car.apps_absent' % label)
+    if absent:
+        catalogue = {}
+        for f in glob.glob(os.path.join(REPO, 'core', 'hookpoints', '*.json')):
+            cat = json.load(open(f))
+            catalogue[cat['app']] = [p['id'] for p in cat['points']]
+        for app, reason in absent.items():
+            if app not in catalogue or app not in mc['app_files']:
+                sys.exit('%s: unknown absent app %s' % (label, app))
+            if not isinstance(reason, str) or not reason:
+                sys.exit('%s: no reason for absent app %s' % (label, app))
+            for pid in catalogue[app]:
+                missing[pid] = reason
+    overlap = set(missing).intersection(mc['points'])
+    if overlap:
+        sys.exit('%s: points are both found and missing: %s' % (label, ', '.join(sorted(overlap))))
+    return missing
 
 
 def main():
@@ -22,23 +74,32 @@ def main():
     ap.add_argument('reports', nargs='+')
     ap.add_argument('--maps', default=os.path.join(REPO, 'maps'))
     ap.add_argument('--status', default='probed', choices=('probed', 'mapped'))
-    ap.add_argument('--make', help="the car's make, for a report from a car HMG-API had no name for (its make is null)")
-    ap.add_argument('--name', help="the car's name, the same")
+    ap.add_argument('--make', choices=('hyundai', 'kia', 'genesis'), help='override an unknown report make')
+    ap.add_argument('--name', help='override the model display name')
     a = ap.parse_args()
     reps = []
     for f in a.reports:
-        r = json.load(open(f))
+        try:
+            r = mapping(json.load(open(f)), f)
+        except (OSError, ValueError) as e:
+            sys.exit('%s: %s' % (f, e))
         if r.get('report') != 'hmgapi car report 1' or 'map_car' not in r:
             sys.exit('%s: not a Car Report with an on-car map' % f)
+        unit = mapping(r.get('unit'), '%s: unit' % f)
+        identity(unit, a.make, f)
+        mc = mapping(r['map_car'], '%s: map_car' % f)
+        for key in ('points', 'files', 'app_files'):
+            mapping(mc.get(key), '%s: map_car.%s' % (f, key))
+        for pid in mc['points']:
+            if pid.split('.')[0] not in mc['app_files']:
+                sys.exit('%s: point %s has no app_files entry' % (f, pid))
+        for path, md5 in mc['files'].items():
+            if not isinstance(md5, str) or not re.fullmatch(r'[0-9a-fA-F]{32}', md5):
+                sys.exit('%s: invalid file md5 for %s' % (f, path))
+        missing_points(mc, f)
         reps.append((os.path.basename(f), r))
-    u = dict(reps[0][1]['unit'])
-    if a.make:
-        u['make'] = a.make
-    if a.name:
-        u['name'] = a.name
-    if not u.get('make'):
-        sys.exit("%s: the report has no make (a car HMG-API had no name for): give --make and --name" % reps[0][0])
-    key = lambda r: (r['unit']['model'], r['unit']['region'], r['unit']['firmware'])
+    u = reps[0][1]['unit']
+    key = lambda r: identity(r['unit'], a.make, 'unit')
     for name, r in reps:
         if key(r) != key(reps[0][1]):
             sys.exit('%s is %s, not %s' % (name, '.'.join(key(r)), '.'.join(key(reps[0][1]))))
@@ -59,10 +120,18 @@ def main():
     by_app = {app: {} for app in mc['app_files']}
     for pid, e in mc['points'].items():
         by_app[pid.split('.')[0]][pid] = e
-    d = os.path.join(a.maps, u['make'].lower(), u['model'].lower(), u['region'].lower(), u['firmware'])
+    make, model, region, firmware = key(reps[0][1])
+    missing = missing_points(mc, reps[0][0])
+    # catalogue points newer than the HMG-API that made the reports: listed, not guessed
+    for f in sorted(glob.glob(os.path.join(REPO, 'core', 'hookpoints', '*.json'))):
+        for p in json.load(open(f))['points']:
+            if p['id'] not in mc['points'] and p['id'] not in missing:
+                missing[p['id']] = ('not in the Car Report: newer than the HMG-API that made it '
+                                    '(a Car Report from a newer HMG-API maps it)')
+    d = os.path.join(a.maps, make, model.lower(), region.lower(), firmware)
     os.makedirs(d, exist_ok=True)
     car = {
-        'make': u['make'].lower(), 'model': u['model'].lower(), 'name': u.get('name') or u['model'],
+        'make': make, 'model': u['model'].lower(), 'name': a.name or u.get('name') or u['model'],
         'region': u['region'].lower(), 'firmware': u['firmware'],
         'products': ['%s.%s.' % (u['model'], u['region'])],
         'status': a.status, 'verified': None,
@@ -70,27 +139,17 @@ def main():
         'apps': sorted(by_app),
         'app_files': mc['app_files'],
     }
-    missing = {k: v for k, v in mc.get('missing', {}).items()}
-    missing.update(mc.get('not_found', {}))
-    # catalogue points newer than the HMG-API that made the reports: listed, not guessed
-    cat = os.path.join(REPO, 'core', 'hookpoints')
-    for f in sorted(os.listdir(cat)):
-        if f.endswith('.json'):
-            for p in json.load(open(os.path.join(cat, f)))['points']:
-                if p['id'] not in mc['points'] and p['id'] not in missing:
-                    missing[p['id']] = ('not in the Car Report: newer than the HMG-API that made it '
-                                        '(a Car Report from a newer HMG-API maps it)')
     if missing:
         car['missing'] = dict(sorted(missing.items()))
     if mc.get('by_reference'):
         car['by_reference'] = sorted(mc['by_reference'])
-    for app, entries in by_app.items():
-        with open(os.path.join(d, app + '.json'), 'w') as f:
-            json.dump(dict(sorted(entries.items())), f, indent=2)
-            f.write('\n')
-    with open(os.path.join(d, 'car.json'), 'w') as f:
-        json.dump(car, f, indent=2)
-        f.write('\n')
+    base = maplib.base(a.maps)
+    if base:   # the repo: base + this build's differences (tools/maplib.py)
+        maplib.write_compact(d, car, {app: dict(sorted(e.items())) for app, e in by_app.items()}, base)
+    else:
+        for app, entries in by_app.items():
+            maplib.dump(dict(sorted(entries.items())), os.path.join(d, app + '.json'))
+        maplib.dump(car, os.path.join(d, 'car.json'))
     print('%s: %d points, %d missing, from %d report(s)' % (os.path.relpath(d, REPO), len(mc['points']), len(missing), len(reps)))
 
 

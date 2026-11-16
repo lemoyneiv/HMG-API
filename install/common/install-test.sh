@@ -20,7 +20,9 @@ printf '#!/bin/sh\nexit 0\n' > $T/bin/chown
 # Android's tools, for the app's install and open.sh: what they're asked goes to calls.log
 printf '#!/bin/sh\necho "${FAKE_BOOT:-0}"\n' > $T/bin/getprop
 printf '#!/bin/sh\necho "setprop $*" >> "%s/calls.log"\n' "$T" > $T/bin/setprop
-printf '#!/bin/sh\necho "pm $*" >> "%s/calls.log"\ncase "$1" in path) [ -n "$FAKE_HAVE_APP" ] && echo package:/data/app/hmgapi.app-1.apk ;; install) echo "${FAKE_PM:-Success}" ;; esac\nexit 0\n' "$T" > $T/bin/pm
+# pm reads the apk through a helper that isn't root: a file others can't read is
+# INSTALL_FAILED_INVALID_URI, as on the car (#187)
+printf '#!/bin/sh\necho "pm $*" >> "%s/calls.log"\ncase "$1" in path) [ -n "$FAKE_HAVE_APP" ] && echo package:/data/app/hmgapi.app-1.apk ;; install) case "$(ls -l "$3" | cut -c8)" in r) echo "${FAKE_PM:-Success}" ;; *) echo "Failure [INSTALL_FAILED_INVALID_URI]" ;; esac ;; esac\nexit 0\n' "$T" > $T/bin/pm
 printf '#!/bin/sh\necho "am $*" >> "%s/calls.log"\n' "$T" > $T/bin/am
 chmod +x $T/bin/*
 calls() { cat $T/calls.log 2>/dev/null || true; : > $T/calls.log; }
@@ -36,12 +38,17 @@ printf '#!/system/bin/sh\n# NEMESIS\nnemesis watchdog\nexit 0\n' > $R/system/etc
 printf 'RED="\\x1b[1;31m"\necho qb stock\n# NEMESIS_QB_HOOK\nnemesis watchdog' > $R/system/etc/qb_runtime.sh   # backslashes and no newline at the end: the uninstall still gives these bytes back
 echo stock > $R/system/lib/libc.so
 # NEMESIS: uninstall <id> runs the package's preuninstall as native/pkg.c does (cwd the package,
-# the caller's environment), then removes it; every call goes to nemesis.log
+# the caller's environment), then removes it; every call goes to nemesis.log. A package another
+# one depends on (its depends= names it) isn't uninstalled: exit 4, as NEMESIS does.
 mkdir -p $R/system/xbin $R/data/nemesis/apps
 cat > $R/system/xbin/nemesis <<NEM
 #!/bin/sh
 echo "nemesis \$* sync=\${HMGAPI_NEMESIS_SYNC:-}" >> $T/nemesis.log
 [ "\$1" = uninstall ] || exit 0
+for o in $R/data/nemesis/apps/*/NEMESIS.data; do
+    [ -f "\$o" ] || continue
+    case ",\$(sed -n 's/^depends="\(.*\)"\$/\1/p' "\$o")," in *",\$2,"*|*",\$2@"*) echo "dependent \$o"; exit 4 ;; esac
+done
 A=$R/data/nemesis/apps/\$2
 (cd "\$A" && ROOT=$R $SH scripts/preuninstall.sh) || { echo "preuninstall failed: package stays"; exit 5; }
 rm -rf "\$A"
@@ -120,12 +127,18 @@ export FAKE_BOOT=1 FAKE_PM='Failure [INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICA
 has "app install failed: said, with the ways to fix it" "the HMG-API app didn't install: Failure [INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES]. It's tried again at the next restart; or NEMESIS Manager > HMG-API > Launch" "$out"
 check "... kept waiting, so the next restart tries again" yes "$([ -f $R/data/hmgapi/public/HmgApi.apk ] && echo yes)"
 c=$(calls)
-has "... pm ran on the traversable /data/hmgapi copy with sys.boot_completed 0" "setprop sys.boot_completed 0
-pm install -r $R/data/hmgapi/HmgApi.apk
+has "... pm ran with sys.boot_completed 0" "setprop sys.boot_completed 0
+pm install -r $R/data/hmgapi/public/HmgApi.apk
 setprop sys.boot_completed 1" "$c"
 has "... a toast on the screen" "Restart the head unit to try again, or use Launch in NEMESIS Manager" "$c"
 export FAKE_BOOT=1 HMGAPI_TEST_ANDROID=1; run $P/install.sh $P; unset FAKE_BOOT HMGAPI_TEST_ANDROID
 has "app install works: said" "installed the HMG-API app" "$out"
+check "... nothing left waiting" no "$([ -f $R/data/hmgapi/public/HmgApi.apk ] && echo yes || echo no)"
+# the USB installer stages the payload with umask 077: pm still gets a copy it can read (#187)
+chmod 600 $P/HmgApi.apk
+export FAKE_BOOT=1 HMGAPI_TEST_ANDROID=1; run $P/install.sh $P; unset FAKE_BOOT HMGAPI_TEST_ANDROID
+chmod 644 $P/HmgApi.apk
+has "app staged root-only (USB): installed all the same" "installed the HMG-API app" "$out"
 check "... nothing left waiting" no "$([ -f $R/data/hmgapi/public/HmgApi.apk ] && echo yes || echo no)"
 
 # open.sh: open the app, installing it first if it's missing
@@ -151,19 +164,23 @@ export FAKE_BOOT=1; run $R/data/hmgapi/open.sh; unset FAKE_BOOT
 has "open.sh: no copy of the app" "there's no copy to install: install HMG-API again" "$out"
 mv $T/apk.away $R/data/hmgapi/HmgApi.apk
 
-# listed in NEMESIS: HMG-API and a mod, the mod's package with an older script copy that would uninstall
-for id in hmgapi hmgapi.demo; do
+# listed in NEMESIS: HMG-API and mods, demo's package with an older script copy that would uninstall,
+# user's depending on base's (its "requires"), which sorts first
+for id in hmgapi hmgapi.demo hmgapi.base hmgapi.user; do
     mkdir -p $R/data/nemesis/apps/$id/scripts $R/data/nemesis/apps/$id/mod
     printf '[nemesis]\nid=%s\npackage-version=1.0.0\n' $id > $R/data/nemesis/apps/$id/NEMESIS.data
+    [ $id = hmgapi ] || { echo ${id#hmgapi.} > $R/data/nemesis/apps/$id/mod/id; echo 'depends="hmgapi@>=1.0"' >> $R/data/nemesis/apps/$id/NEMESIS.data; }
 done
-echo demo > $R/data/nemesis/apps/hmgapi.demo/mod/id
+echo 'depends="hmgapi@>=1.0,hmgapi.base@>=1.0.0"' >> $R/data/nemesis/apps/hmgapi.user/NEMESIS.data
 cp install/nemesis/scripts/*.sh $R/data/nemesis/apps/hmgapi/scripts/
 printf '#!/system/bin/sh\necho "old script: would remove the mod"\nexit 1\n' > $R/data/nemesis/apps/hmgapi.demo/scripts/preuninstall.sh
 : > $T/nemesis.log
 run $R/data/hmgapi/uninstall.sh
 has "uninstall finishes" "HMG-API uninstalled" "$out"
-check "... NEMESIS: the mod's package unlisted first, then HMG-API's, list-only" "nemesis uninstall hmgapi.demo sync=1|nemesis uninstall hmgapi sync=1" "$(tr '\n' '|' < $T/nemesis.log | sed 's/|$//')"
-check "... neither listed any more (the old script copy refreshed first)" "" "$(ls $R/data/nemesis/apps)"
+check "... NEMESIS: the mods' packages unlisted first (base again once user's is gone), then HMG-API's, list-only" \
+    "nemesis uninstall hmgapi.base sync=1|nemesis uninstall hmgapi.demo sync=1|nemesis uninstall hmgapi.user sync=1|nemesis uninstall hmgapi.base sync=1|nemesis uninstall hmgapi sync=1" \
+    "$(tr '\n' '|' < $T/nemesis.log | sed 's/|$//')"
+check "... none listed any more (the old script copy refreshed first)" "" "$(ls $R/data/nemesis/apps)"
 has "... said" "NEMESIS: hmgapi unlisted" "$out"
 check "the app's copy, open.sh, hook-check.sh, boot.sh and wake.sh gone" no "$([ -e $R/data/hmgapi/HmgApi.apk ] || [ -e $R/data/hmgapi/open.sh ] || [ -e $R/data/hmgapi/hook-check.sh ] || [ -e $R/data/hmgapi/boot.sh ] || [ -e $R/data/hmgapi/wake.sh ] && echo yes || echo no)"
 check "/system byte-identical to stock" "$BEFORE" "$(tree)"

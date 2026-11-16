@@ -25,6 +25,9 @@ import argparse, glob, hashlib, json, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import dexsig  # noqa: E402
+import maplib  # noqa: E402
 BAKSMALI = os.environ.get('BAKSMALI', os.path.expanduser('~/.local/share/smali/baksmali-2.5.2.jar'))
 BCP = ['core', 'conscrypt', 'okhttp', 'core-junit', 'bouncycastle', 'ext', 'framework', 'framework2',
        'telephony-common', 'voip-common', 'mms-common', 'android.policy', 'services', 'apache-xml',
@@ -118,6 +121,7 @@ def deodex(odex, fw, out):
 class Mapper:
     def __init__(self, tree, work):
         self.tree, self.work = tree, work
+        self.sigs = {}
         self.fw = os.path.join(tree, 'framework')
         self.framework = {}
         for j in BCP:
@@ -261,6 +265,19 @@ class Mapper:
             return {'method': h['name'], 'params': h['params'], 'ret': h['ret'], 'static': h['static']}
         raise MapError('%s: unknown kind %s' % (pt['id'], kind))
 
+    def sig(self, cat, cls, r):
+        """a method's code signature (tools/dexsig.py), kept on smali-only method points: the on-car
+        mapper borrows another car's name for one only when the code is the same"""
+        key = (cls, r['method'], tuple(r['params']))
+        for f in cat['files']:
+            if not os.path.isfile(self.local(f)):
+                continue
+            if f not in self.sigs:
+                self.sigs[f] = dexsig.sigs(self.local(f))
+            if key in self.sigs[f]:
+                return self.sigs[f][key]
+        raise MapError('%s.%s: no code in %s' % (cls, r['method'], ', '.join(cat['files'])))
+
     def map_catalogue(self, cat, missing=None):
         """the catalogue's points found in the tree. missing: a dict to collect {point: why}
         for the ones that aren't (partial); None: the first one is an error (strict)"""
@@ -290,6 +307,8 @@ class Mapper:
                     continue
                 self.found[pt['id']] = r
                 out[pt['id']] = {'class': r} if pt['kind'] == 'class' else r
+                if pt['kind'] == 'method' and ('pattern' in pt['find'] or 'code' in pt['find']):
+                    r['sig'] = self.sig(cat, self.found[pt['of']], r)
                 pending.remove(pt)
                 progress = True
             if not progress:
@@ -374,13 +393,12 @@ def run(a, work):
         sys.exit('not mapped: no hook point found in %s' % a.tree)
     d = os.path.join(a.maps, a.make, a.model, a.region, a.firmware)
     os.makedirs(d, exist_ok=True)
-    old = {}
-    for app in apps:
-        p = os.path.join(d, app + '.json')
-        old[app] = json.load(open(p)) if os.path.isfile(p) else None
     cj = os.path.join(d, 'car.json')
-    prev = json.load(open(cj)) if os.path.isfile(cj) else {}
-    same = all(old[app] == apps[app] for app in apps) and prev.get('files') == files and prev.get('missing', {}) == (missing or {})
+    prev, old = maplib.load(d, a.maps) if os.path.isfile(cj) else ({}, {})   # either form (tools/maplib.py)
+    old = {app: old.get(app) for app in apps}
+    # a map that only gains code signatures ("sig") is the same map: it keeps its status
+    nosig = lambda m: {k: {x: y for x, y in v.items() if x != 'sig'} for k, v in (m or {}).items()}
+    same = all(nosig(old[app]) == nosig(apps[app]) for app in apps) and prev.get('files') == files and prev.get('missing', {}) == (missing or {})
     car = {
         'make': a.make, 'model': a.model, 'name': a.name or prev.get('name') or a.model, 'region': a.region,
         'firmware': a.firmware, 'products': [p for p in a.products.split(',') if p],
@@ -392,11 +410,13 @@ def run(a, work):
     }
     if missing:
         car['missing'] = dict(sorted(missing.items()))
-    for app, entries in apps.items():
-        json.dump(dict(sorted(entries.items())), open(os.path.join(d, app + '.json'), 'w'), indent=2)
-        open(os.path.join(d, app + '.json'), 'a').write('\n')
-    json.dump(car, open(cj, 'w'), indent=2)
-    open(cj, 'a').write('\n')
+    base = maplib.base(a.maps)
+    if base:   # the repo: base + this build's differences
+        maplib.write_compact(d, car, {app: dict(sorted(e.items())) for app, e in apps.items()}, base)
+    else:      # a maps dir without a base (a scratch dir, a test): full per-app files
+        for app, entries in apps.items():
+            maplib.dump(dict(sorted(entries.items())), os.path.join(d, app + '.json'))
+        maplib.dump(car, cj)
     n = sum(len(v) for v in apps.values())
     print('%s: %d points in %d apps, status %s%s' % (os.path.relpath(d, REPO), n, len(apps), car['status'],
                                                     ', %d missing' % len(missing) if missing else ''))

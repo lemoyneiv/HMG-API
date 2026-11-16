@@ -1,0 +1,213 @@
+{
+  "make": "genesis",
+  "model": "ikfl",
+  "name": "G70",
+  "region": "can",
+  "firmware": "260903",
+  "products": [
+    "IKFL.CAN."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "8211103ea8ccfa67a9ef811b04b87e92",
+    "/system/app/HKMC_BtSettings.odex": "4c1d13538a4a0ade9e923390d5d079f0",
+    "/system/app/HKMC_HomeSetting_WP.odex": "6f2fb3451425f0433b4f4eb463660c4d",
+    "/system/app/Launcher_WP3.odex": "d1a5d69387dd1776eee85db9e7823e2e",
+    "/system/app/RightScreenHome.odex": "1f7d68b54f4c3b6b0d205b48a39d9c43",
+    "/system/app/Settings_W.odex": "b7a26df4a01b458d67905dbab85e0245",
+    "/system/app/ThemeSettings.odex": "da1c21a0ad131353ed633c0a18602a26",
+    "/system/framework/automotive-service.odex": "6fcb1f204021237ea2567b8a87f2b2f7",
+    "/system/framework/automotive.odex": "da5c4d37f1b5509cc74af65245292a32",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "3c27bd9047d584c9f3bd3ae3ce11a749",
+    "/system/framework/com.tcc.iap2.odex": "8f8ab477a9f961aca1316a7a5f243498",
+    "/system/framework/core.odex": "8d9df6a0caedfb5a72f44ca3e459feb7",
+    "/system/framework/framework.odex": "7d6b8b1d676c02dd657b7f6734e081d9",
+    "/system/framework/framework2.odex": "d1d55c3cc755e4094ebc4cb96d21f63b"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "btsettings.projection_helper.device_connections_available": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_device_connections": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_other_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_wireless_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "dipo.bt": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.bt.set_carplay_bt_address": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.btcm": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.btcm.register_listener": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.decode_failure": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.disable_bluetooth": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.force_key_frame": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.iap_message": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.native_iap_send": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.screen_timeout": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.session_created": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.session_finalized": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.carplay.session_started": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2.bt_address": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2.set_notify_on": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_client": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_client.manager": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_listener": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_listener.connected": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_listener.disconnected": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_listener.notify": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_listener.owner": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_proxy": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.iap2_proxy.stop_route_guidance": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.session_listener": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.session_listener.session_details": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.utils": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "dipo.utils.is_support_wireless_carplay": "no stock /system/app/HKMC_DiPO.odex on this car",
+    "gpm.cluster_type": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.cluster_type.enum": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.cluster_type.image": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.navigation_status": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.navigation_status.init": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.navigation_status.next_turn": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.navigation_status.next_turn_distance": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.navigation_status.receiver": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.navigation_status.status": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.receiver": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.receiver.destroy": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.receiver.focus_native": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.receiver.send_navigation_focus": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.receiver_service": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.receiver_service.disconnected": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.sensor_source": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.sensor_source.init": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.sensor_source.speed": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.video_sink": "no stock /system/app/HKMC_GPM.odex on this car",
+    "gpm.video_sink.nearest": "no stock /system/app/HKMC_GPM.odex on this car",
+    "iap2.init_info": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.init_info.check_supports_features": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.init_info.route_guidance": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.init_info.use_vehicle_information": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.init_info.use_vehicle_status": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.get_component": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.is_connected": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.native_handle": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.native_lock": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.on_bind": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.on_create": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.on_destroy": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.receive_connect": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.receive_disconnect": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service.set_device_serial": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service_receiver": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service_receiver.on_receive": "no stock /system/app/Iap2ServerApp.odex on this car",
+    "iap2.service_receiver.service": "no stock /system/app/Iap2ServerApp.odex on this car"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "panel.home.build_views",
+    "panel.home.test_page",
+    "panel.test_gate",
+    "panel.test_gate.on",
+    "panel.test_page",
+    "themesettings.split_item.type"
+  ],
+  "names": {
+    "homesetting.edit_list.items": {
+      "field": "cu",
+      "type": "java.util.List",
+      "static": true
+    }
+  },
+  "unconfirmed": [
+    "panel.home.build_views",
+    "panel.test_gate.on",
+    "themesettings.split_item.type"
+  ]
+}

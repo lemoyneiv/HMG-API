@@ -59,7 +59,7 @@ import java.util.TreeMap;
  * names the lpatch binary.
  */
 public final class Engine {
-    public static final String HMGAPI_VERSION = "1.1.1-rc.2";
+    public static final String HMGAPI_VERSION = "1.1.1-rc.3";
     /**
      * The release a pre-release leads to (1.1.0 for 1.1.0-rc.1): what a mod's "hmgapi"
      * range of final versions is checked against (Version.meetsHmgapi). Updates compare
@@ -71,24 +71,11 @@ public final class Engine {
     final String lpatch = env("HMGAPI_LPATCH", "/system/bin/lpatch");
     /** How the enabled mods' hooks fit together (the same rules the zygote's loader uses). */
     HookPlan hookPlan() {
-        Map<String, Map<String, Object>> enabled = new LinkedHashMap<String, Map<String, Object>>();
-        File[] ds = new File(data, "mods").listFiles();
-        if (ds != null) {
-            java.util.Arrays.sort(ds);
-            for (File d : ds) {
-                File mj = new File(d, "mod.json");
-                if (!d.isDirectory() || new File(d, ".disabled").exists() || !mj.isFile()) continue;
-                try {
-                    enabled.put(d.getName(), Json.object(read(mj)));
-                } catch (Exception ignored) {
-                    // reported by the mod loader
-                }
-            }
-        }
+        Map<String, Map<String, Object>> enabled = HookPlan.enabled(new File(data, "mods"));   // as the mod loader reads them
         CarMap map = CarMap.load(root, facts, hmgapi);
         if (host && "1".equals(env("HMGAPI_TEST_ANY_CAR", ""))) return HookPlan.of(enabled, null);   // desktop tests: no map
         if (!map.runnable) return HookPlan.of(enabled, java.util.Collections.<String>emptySet(), offMissing(map));
-        return HookPlan.of(enabled, map.points.keySet(), map.missing);
+        return HookPlan.of(enabled, map.points.keySet(), map.missing, map.localOnly());
     }
 
     /** hooks off on this car: every catalogue point counts as missing, with the map's reason */
@@ -270,7 +257,7 @@ public final class Engine {
 
         if ("status".equals(cmd)) return status();
         if ("verify-map".equals(cmd)) return MapCheck.run(this);
-        if ("map-car".equals(cmd)) return MapProbe.run(this, args.length > 1 && "--write".equals(args[1]));
+        if ("map-car".equals(cmd)) return MapProbe.run(this, args);
         if ("report".equals(cmd)) return Report.run(this, args.length > 1 && "--usb".equals(args[1]));
         if ("usb-scan".equals(cmd)) return UsbUpdates.scan(this);
         if ("publish-state".equals(cmd)) return LiveState.publish(this);
@@ -337,7 +324,7 @@ public final class Engine {
             if (!map.runnable) out.add("hooks are off on this car (" + map.reason + "): mods apply without their hooks");
         }
         if (!restoreAll && !"plan".equals(cmd) && !"apply".equals(cmd)) {
-            out.add("usage: engine plan | apply [--trial] | keep | restore | status | recover | firmware-reset | install <zip|dir> | remove <id> | nemesis-sync | map | map-car [--write] | verify-map | report [--usb] | usb-scan | update-hmgapi <zip> | publish-state | apps");
+            out.add("usage: engine plan | apply [--trial] | keep | restore | status | recover | firmware-reset | install <zip|dir> | remove <id> | nemesis-sync | map | map-car [--local [--if-needed] | --write | --forget] | verify-map | report [--usb] | usb-scan | update-hmgapi <zip> | publish-state | apps");
             return 2;
         }
         Plan p = plan(restoreAll, force);
@@ -418,7 +405,7 @@ public final class Engine {
                 problems.add(m.id + ": " + e.getMessage());
                 continue;
             }
-            String sys = SystemCheck.check(m.json.get("system"), facts);
+            String sys = SystemCheck.check(m.json.get("system"), facts, SystemCheck.asksHotspot(m.json));
             if (sys != null) {
                 if (!SystemCheck.ignored(hmgapi, m.id)) {
                     problems.add(m.id + ": " + sys);
@@ -432,7 +419,7 @@ public final class Engine {
                 for (Object o : (List<Object>) parts) {
                     Map<String, Object> part = (Map<String, Object>) o;
                     if (when((String) part.get("when"), m.settings)) {
-                        String ps = SystemCheck.check(part.get("system"), facts);
+                        String ps = SystemCheck.check(part.get("system"), facts, SystemCheck.asksHotspot(m.json));
                         if (ps != null && !SystemCheck.ignored(hmgapi, m.id)) {
                             out.add(m.id + ": part " + part.get("id") + " left out: " + ps);
                             continue;
@@ -469,11 +456,53 @@ public final class Engine {
      * shares it; it stays while any mod wants it) and its featurexml.cfg line
      * commented out (the car deletes the file at boot while the line is live).
      */
+    /** the permissions file HMG-API writes for a feature: the same bytes for every mod (SystemCheck knows it by them) */
+    static String featureXml(String name) {
+        return "<permissions>\n    <feature name=\"" + name + "\" />\n</permissions>\n";
+    }
+
+    /** the stock hotspot feature: without it the unit never powers its Wi-Fi chip */
+    static final String HOTSPOT = "com.hkmc.software.wifihotspot";
+
+    /** mod.json "wifi": {"client": true} and/or {"hotspot": true} */
+    @SuppressWarnings("unchecked")
+    static boolean wifiAsk(Object wifi, String what) {
+        if (wifi == null) return false;
+        String usage = "\"wifi\": {\"client\": true} and/or {\"hotspot\": true}";
+        if (!(wifi instanceof Map)) throw new IllegalArgumentException(usage);
+        for (Map.Entry<String, Object> e : ((Map<String, Object>) wifi).entrySet()) {
+            if (!("client".equals(e.getKey()) || "hotspot".equals(e.getKey())) || !(e.getValue() instanceof Boolean)) throw new IllegalArgumentException(usage);
+        }
+        return Boolean.TRUE.equals(((Map<String, Object>) wifi).get(what));
+    }
+
     @SuppressWarnings("unchecked")
     void features(Mod m) throws IOException {
         Object f = m.json.get("feature_flags");
         Object wifi = m.json.get("wifi");
-        if (wifi instanceof Map && Boolean.TRUE.equals(((Map<String, Object>) wifi).get("client"))) {
+        boolean client = wifiAsk(wifi, "client"), hotspot = wifiAsk(wifi, "hotspot");
+        if (hotspot) {
+            // "wifi": {"hotspot": true}: the stock hotspot feature, which is what makes the unit power
+            // its Wi-Fi chip (Korean units and some US trims ship without it, or delete it at boot from
+            // featurexml.cfg). A stock file that's there stays: only its featurexml line is commented
+            // out. Otherwise HMG-API's own file goes in, as for "feature_flags", shared by every mod.
+            File stock = new File(root + "/system/etc/permissions/" + HOTSPOT + ".xml");
+            if (stock.isFile() && !read(stock).equals(featureXml(HOTSPOT))) {
+                List<Object> changes = (List<Object>) m.patches.get("changes");
+                if (changes == null) m.patches.put("changes", changes = new ArrayList<Object>());
+                Map<String, Object> cfg = new LinkedHashMap<String, Object>();
+                cfg.put("type", "lines");
+                cfg.put("path", "/system/onebin/{onebin}/featurexml.cfg");
+                cfg.put("stock", "any");
+                cfg.put("comment", new ArrayList<Object>(java.util.Arrays.asList("-/system/etc/permissions/" + HOTSPOT + ".xml")));
+                changes.add(cfg);
+            } else {
+                List<Object> l = f instanceof List ? new ArrayList<Object>((List<Object>) f) : new ArrayList<Object>();
+                if (!l.contains(HOTSPOT)) l.add(HOTSPOT);
+                m.json.put("feature_flags", f = l);
+            }
+        }
+        if (client) {
             // "wifi": {"client": true}: Hyundai's Wi-Fi client (Tilepad's toggle, the Wireless mod's
             // opt-in): the android.hardware.wifi feature and persist.wifi.state=3 (client + wireless;
             // client and hotspot share one channel on these units). The same for every mod: merged.
@@ -487,8 +516,6 @@ public final class Engine {
             prop.put("key", "persist.wifi.state");
             prop.put("value", "3");
             changes.add(prop);
-        } else if (wifi != null) {
-            throw new IllegalArgumentException("\"wifi\": {\"client\": true}");
         }
         if (f == null) return;
         if (!(f instanceof List)) throw new IllegalArgumentException("\"feature_flags\" is a list of feature names");
@@ -501,7 +528,7 @@ public final class Engine {
             if (!name.matches(FEATURE)) throw new IllegalArgumentException("feature \"" + name + "\": a com.hkmc.*, android.hardware.* or android.software.* name");
             dir.mkdirs();
             File x = new File(dir, name + ".xml");
-            String text = "<permissions>\n    <feature name=\"" + name + "\" />\n</permissions>\n";
+            String text = featureXml(name);
             if (!(x.isFile() && read(x).equals(text))) write(x, text);
             Map<String, Object> add = new LinkedHashMap<String, Object>();
             add.put("type", "add");

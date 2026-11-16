@@ -116,5 +116,17 @@
         "/system/app/ThemeSettings.odex"
       ]
     }
+  },
+  "names": {
+    "dipo.iap2_client.manager": {
+      "field": "L",
+      "type": "com.daudio.app.dipo.e.b",
+      "static": false
+    },
+    "homesetting.edit_list.items": {
+      "field": "cu",
+      "type": "java.util.List",
+      "static": true
+    }
   }
 }

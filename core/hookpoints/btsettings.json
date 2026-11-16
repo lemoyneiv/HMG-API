@@ -47,7 +47,18 @@
         "group": "available",
         "params": [],
         "ret": "boolean",
-        "static": true
+        "static": true,
+        "site": {
+          "in": "com.android.settings2.bluetooth.BluetoothSettings",
+          "next": [
+            "move-result",
+            "if-eqz",
+            "invoke-virtual",
+            "move-result-object",
+            "invoke-static"
+          ],
+          "then_calls": "@btsettings.projection_helper.open_device_connections"
+        }
       }
     },
     {

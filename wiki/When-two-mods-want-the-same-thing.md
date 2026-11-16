@@ -11,6 +11,7 @@ HMG-API settles it, and the plan says how. Mods never overwrite each other.
 | the ambient light, the rear camera | one mod at a time; the other is told who has it |
 | battery conditioning | one shared on/off; a stop you or a mod asks for wins over an automatic start |
 | the same feature flag or Wi-Fi client | shared: it stays on while any mod wants it |
+| not to run next to each other (a mod's `conflicts`, such as two builds of one mod) | the first in load order runs, the other is shown as a conflict until you turn one off |
 
 ## Picking which mod gets a button or the density
 

@@ -68,6 +68,9 @@ case \$1 in
         rm -rf "\$st"; exit \$rc ;;
     uninstall)
         [ -d "\$A/\$2" ] || { echo "not installed: \$2"; exit 3; }
+        for o in \$A/*/NEMESIS.data; do   # another package depends on it: exit 4
+            case ",\$(sed -n 's/^depends="\(.*\)"\$/\1/p' "\$o")," in *",\$2,"*|*",\$2@"*) echo "dependent \${o%/NEMESIS.data}"; exit 4 ;; esac
+        done
         hook scripts/preuninstall.sh "\$A/\$2" || { echo "preuninstall failed: package stays"; exit 5; }
         rm -rf "\$A/\$2" ;;
 esac
@@ -153,6 +156,20 @@ ecalls > /dev/null
 eng nemesis-sync
 check "stale hmgapi.demo: unlisted" "0 hmgapi " "$rc $(listed)"
 check "... with HMG-API's current scripts (the old copy refreshed first), no engine" "nemesis-sync" "$(ecalls | sed 's/^engine //')"
+
+# ---- stale entries where one depends on the other (a mod package's "requires"), the needed one first
+for id in base user; do
+    mkdir -p $R/data/nemesis/apps/hmgapi.$id/scripts $R/data/nemesis/apps/hmgapi.$id/mod
+    echo $id > $R/data/nemesis/apps/hmgapi.$id/mod/id
+    printf '[nemesis]\nid=hmgapi.%s\npackage-version=1.0.0\ndepends="hmgapi@>=1.0"\n' $id > $R/data/nemesis/apps/hmgapi.$id/NEMESIS.data
+done
+sed 's/^depends=.*/depends="hmgapi@>=1.0,hmgapi.base@>=1.0.0"/' $R/data/nemesis/apps/hmgapi.user/NEMESIS.data > $T/user.data && mv $T/user.data $R/data/nemesis/apps/hmgapi.user/NEMESIS.data
+nlog > /dev/null
+eng nemesis-sync
+check "a stale package another one depends on: unlisted once that one is" "0 hmgapi " "$rc $(listed)"
+check "... tried again after it" "nemesis uninstall hmgapi.base|nemesis uninstall hmgapi.user|nemesis uninstall hmgapi.base" \
+    "$(nlog | grep uninstall | sed 's/ sync=.*//' | tr '\n' '|' | sed 's/|$//')"
+has "... no failure said" "NEMESIS lists HMG-API and its" "$out"
 
 # ---- uninstalled in NEMESIS Manager by the owner: HMG-API removes the mod (the real work)
 mk 1.0.0

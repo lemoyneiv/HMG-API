@@ -6,6 +6,10 @@ set -e
 cd "$(dirname "$0")/../.."
 CP=$(mktemp -d); T=$(mktemp -d); trap 'rm -rf "$T" "$CP"' EXIT
 sh tools/engine-classes.sh "$CP" 2>/dev/null
+javac --release 8 -cp "$CP" -d "$CP" core/runtime/test/hmgapi/engine/MapProbeTest.java
+java -cp "$CP" hmgapi.engine.MapProbeTest "$T/probe"
+javac --release 8 -cp "$CP" -d "$CP" core/runtime/test/hmgapi/engine/MapProbeMethodTest.java
+java -cp "$CP" hmgapi.engine.MapProbeMethodTest "$T/probe-method" "$(python3 -I -c 'import sys; sys.path.insert(0, "tools"); import dexsig; print(dexsig.SAMPLE_SIG)')"
 R=$T/root
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1: wanted [$2], got [$3]"; fail=1; fi; }

@@ -1,0 +1,143 @@
+{
+  "make": "kia",
+  "model": "kmc",
+  "name": "K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21",
+  "region": "usa",
+  "firmware": "260507",
+  "products": [
+    "CKPE.USA.",
+    "CKPE23.USA.",
+    "DE20EV.USA.",
+    "DE22EV.USA.",
+    "DE22HEV.USA.",
+    "DE22PHEV.USA.",
+    "DEPEHEV.USA.",
+    "DEPEPHEV.USA.",
+    "DL3.USA.",
+    "DL322.USA.",
+    "MQ4.USA.",
+    "MQ422.USA.",
+    "MQ422HEV.USA.",
+    "MQ4HEV.USA.",
+    "MQ4PHEV.USA.",
+    "ON.USA.",
+    "ON22.USA.",
+    "SK3.USA.",
+    "SK322.USA.",
+    "SK3EV.USA.",
+    "SK3EV22.USA.",
+    "SP2.USA.",
+    "SP222.USA.",
+    "YGPE.USA."
+  ],
+  "status": "mapped",
+  "verified": null,
+  "files": {
+    "/system/app/HKMC_BtSettings.odex": "97d0a9b4aa5e98dd7eb1435fc81d85cb",
+    "/system/app/ButtonSettings.odex": "559fa1e1cba6410c79666efb7acab614",
+    "/system/app/HKMC_DiPO.odex": "edc6f75f5ccf79b63dc85a0902b63d91",
+    "/system/framework/com.tcc.iap2.odex": "e292ac34688ca75bbe6f8a2a66a89d4c",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/framework.odex": "231bf2d54a8bfbaa5b2c6ec172efe400",
+    "/system/framework/core.odex": "7edebabed14b878b0cc852372a1d7b18",
+    "/system/framework/framework2.odex": "3af79f1737cfb7eb673aba1c8be0a34b",
+    "/system/framework/automotive.odex": "7c99638e39c369c45fab9c485b103cf0",
+    "/system/framework/com.hkmc.ext.hcan.odex": "da84ebbccae989f2927a692d0351ed18",
+    "/system/framework/automotive-service.odex": "04fd3c2e9bc7444c2ae812b57a83ac5d",
+    "/system/app/HKMC_GPM.odex": "684183c9d0ef4c5b87f8ba42c94962c8",
+    "/system/app/HKMC_HomeSetting_WP.odex": "f7fa70500994b0e7331648be8e894c59",
+    "/system/app/Iap2ServerApp.odex": "381b49afb7d28e03b390e2a220602252",
+    "/system/app/Launcher_WP3.odex": "70a03832fd3f696e1f34269c77b52f70",
+    "/system/app/RightScreenHome.odex": "bd97b438aeb3d9c77510b5e2da4234f7",
+    "/system/app/Settings_W.odex": "45106733d6a5a889a9bc8e17c9ed9431",
+    "/system/app/ThemeSettings.odex": "969a59fef7bbe653ccc73abe2a2f3c16"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  }
+}

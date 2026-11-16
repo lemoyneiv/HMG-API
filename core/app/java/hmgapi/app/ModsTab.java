@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Mods: every installed mod on the left with its state (green on, yellow a hook
+ * Mods: every installed mod on the left with its state (green on, yellow a
  * conflict, red not loaded on this car or an error, grey off), and the chosen one on
  * the right: its switch, why it isn't running if it isn't, its settings, its log
  * (HMG-API's log lines for it and its services' output), Remove.
@@ -191,7 +191,7 @@ final class ModsTab {
         head.addView(on);
         detail.addView(head);
         if (m.enabled && m.color() != Ui.ACCENT && m.error != null) {
-            TextView box = Ui.text(detail, (m.color() == Ui.WARN ? "Hooks conflict\n" : "Not running on this car\n") + m.error,
+            TextView box = Ui.text(detail, (m.color() == Ui.WARN ? "Conflict\n" : "Not running\n") + m.error,
                     17, false, Ui.TEXT);
             box.setBackground(Ui.box(a, m.color() == Ui.WARN ? 0xff3a3320 : 0xff301a18, m.color(), 10));
             int p = Ui.dp(a, 14);

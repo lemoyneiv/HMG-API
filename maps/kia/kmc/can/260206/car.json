@@ -1,0 +1,154 @@
+{
+  "make": "kia",
+  "model": "kmc",
+  "name": "K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21",
+  "region": "can",
+  "firmware": "260206",
+  "products": [
+    "CKPE.CAN.",
+    "DE20EV.CAN.",
+    "DE22EV.CAN.",
+    "DE22HEV.CAN.",
+    "DE22PHEV.CAN.",
+    "DEPEHEV.CAN.",
+    "DEPEPHEV.CAN.",
+    "DL322.CAN.",
+    "DL3.CAN.",
+    "MQ422.CAN.",
+    "MQ422HEV.CAN.",
+    "MQ4.CAN.",
+    "MQ4HEV.CAN.",
+    "MQ4PHEV.CAN.",
+    "ON22.CAN.",
+    "ON.CAN.",
+    "SK322.CAN.",
+    "SK3.CAN.",
+    "SK3EV22.CAN.",
+    "SK3EV.CAN.",
+    "SP222.CAN.",
+    "SP2.CAN.",
+    "YGPE.CAN."
+  ],
+  "status": "mapped",
+  "verified": null,
+  "files": {
+    "/system/app/HKMC_BtSettings.odex": "db369ae8cad94d05e842a36034644d3e",
+    "/system/app/ButtonSettings.odex": "559fa1e1cba6410c79666efb7acab614",
+    "/system/app/HKMC_DiPO.odex": "f1e82132c19c3a14478cb99a9dfd7560",
+    "/system/framework/com.tcc.iap2.odex": "c572a5766062225513daea472c38aa09",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/framework.odex": "6cb2a8d1f10906c91d740c32cc648d58",
+    "/system/framework/core.odex": "400f470d75e1d50355e8ce43cb82b0e6",
+    "/system/framework/framework2.odex": "fd803d3b308fdbb52fc97fd3d3797735",
+    "/system/framework/automotive.odex": "3062920642cde523a17b500740d109cb",
+    "/system/framework/com.hkmc.ext.hcan.odex": "a4e72130ec2f82be2a1f4cfb6352a2bc",
+    "/system/framework/automotive-service.odex": "c2966bdb7d0d02d23513274253dda8a6",
+    "/system/app/HKMC_GPM.odex": "13de3ed57622c3006d50a48b5469285d",
+    "/system/app/HKMC_HomeSetting_WP.odex": "bf5fe450da0d1815d5d7af33e1d300e5",
+    "/system/app/Iap2ServerApp.odex": "ca77dff5d8aa9a0720ad9f86cd1fab73",
+    "/system/app/Launcher_WP3.odex": "e894dab275780dab13592b0483e873fa",
+    "/system/app/RightScreenHome.odex": "df6e0bec4b81ebc4054ab77c600a318d",
+    "/system/app/Settings_W.odex": "45106733d6a5a889a9bc8e17c9ed9431",
+    "/system/app/ThemeSettings.odex": "c92eb6d5e955efe9fe4962600d713778"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "names": {
+    "dipo.iap2_client.manager": {
+      "field": "L",
+      "type": "com.daudio.app.dipo.e.b",
+      "static": false
+    },
+    "homesetting.edit_list.items": {
+      "field": "cu",
+      "type": "java.util.List",
+      "static": true
+    }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "make": "hyundai",
+  "model": "ceev",
+  "name": "Ioniq 6",
+  "region": "usa",
+  "firmware": "260903",
+  "products": [
+    "CEEV.CAN.",
+    "CEEV.USA."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "f0867c1b46d33fdc6849d7128e9661c3",
+    "/system/app/HKMC_BtSettings.odex": "1153269091ff27d5f4dcefd259b87648",
+    "/system/app/HKMC_DiPO.odex": "14383f8e014921fa30797b23a17b10a4",
+    "/system/app/HKMC_GPM.odex": "2f61381ea334d91019e3b51a59ec21b8",
+    "/system/app/HKMC_HomeSetting_WP.odex": "8c66cbec25575f048e0a048531dfe380",
+    "/system/app/Iap2ServerApp.odex": "46f392ece018bb218d180035b28e658b",
+    "/system/app/Launcher_WP3.odex": "620b650ccb13dd86ffc8a0cc0e206af7",
+    "/system/app/RightScreenHome.odex": "e326ce15730514ee1609e336804c3038",
+    "/system/app/Settings_W.odex": "9d1c28688f30acb710af157330dba566",
+    "/system/app/ThemeSettings.odex": "b7752d76ae0a822c2285e9ccf277df67",
+    "/system/framework/automotive-service.odex": "cfc66b049df76432f6c96abd823fddca",
+    "/system/framework/automotive.odex": "a4f8d624d22a879eb6a08d858267ffff",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "32cf4702fef245a2c7c2118b2fb54ae1",
+    "/system/framework/com.tcc.iap2.odex": "db6066b0d3d2f72c23240f5d13b0ffab",
+    "/system/framework/core.odex": "eaf8c0ac1d4a38c6332d0dfb43766db5",
+    "/system/framework/framework.odex": "4bfb7a93ce01fa510df3b9d1c8be41a5",
+    "/system/framework/framework2.odex": "90f92ea8f6ea62f933b2b3199576b532"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "btsettings.projection_helper.device_connections_available": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_device_connections": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_other_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_wireless_page": "0 methods match in com.android.settings2.bluetooth.iP"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.home.test_page",
+    "panel.test_gate",
+    "panel.test_gate.on",
+    "panel.test_page",
+    "themesettings.split_item.type"
+  ],
+  "names": {
+    "dipo.iap2_client.manager": {
+      "field": "L",
+      "type": "com.daudio.app.dipo.e.b",
+      "static": false
+    },
+    "homesetting.edit_list.items": {
+      "field": "cu",
+      "type": "java.util.List",
+      "static": true
+    }
+  },
+  "unconfirmed": [
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.test_gate.on",
+    "themesettings.split_item.type"
+  ]
+}

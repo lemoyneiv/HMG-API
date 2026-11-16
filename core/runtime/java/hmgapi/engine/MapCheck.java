@@ -28,19 +28,55 @@ final class MapCheck {
             e.out.add("can't check: " + m.reason);
             return 5;
         }
-        if (e.host) {
+        if (e.host && System.getenv("HMGAPI_TEST_MAPCHECK") == null) {
             e.out.add("verify-map runs on the head unit only");
             return 2;
+        }
+        List<String> failed = new ArrayList<String>();
+        Map<String, String> why = resolve(e, m, m.points.keySet());
+        for (Map.Entry<String, String> f : why.entrySet()) failed.add(f.getKey() + ": " + f.getValue());
+        int ok = m.points.size() - why.size();
+        Map<String, Object> rep = new LinkedHashMap<String, Object>();
+        rep.put("folder", m.folder);
+        rep.put("files", m.carJson.get("files"));
+        rep.put("ok", failed.isEmpty());
+        rep.put("points", (long) m.points.size());
+        rep.put("failed", new ArrayList<Object>(failed));
+        rep.put("date", new java.util.Date().toString());
+        rep.put("product", e.facts.get("product"));
+        Engine.write(new File(e.stateDir, "map-check.json"), Json.write(rep));
+        e.out.add("map " + m.folder + ": " + ok + " of " + m.points.size() + " hook points resolve in this car's apps");
+        for (String f : failed) e.out.add("  FAILED " + f);
+        e.out.add(failed.isEmpty() ? "map checked on this car: hooks run with it from the next start (report: state/map-check.json)"
+                        + (m.missing.isEmpty() ? "" : "; " + m.missing.size() + " point(s) aren't in it, their features and mods stay off")
+                : "the map doesn't fit this car; hooks stay off");
+        return failed.isEmpty() ? 0 : 1;
+    }
+
+    /**
+     * Resolves these points of m in this car's own apps (each app's stock APK in a class
+     * loader of its own: the app doesn't start): id -> why it doesn't, for each that doesn't.
+     * Off the unit (tests, HMGAPI_HOST) only with HMGAPI_TEST_MAPCHECK, a stand-in: "pass",
+     * or "fail:<id>,<id>" for the ones that fail.
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, String> resolve(Engine e, CarMap m, java.util.Collection<String> ids) throws Exception {
+        Map<String, String> failed = new LinkedHashMap<String, String>();
+        if (e.host) {
+            String t = System.getenv("HMGAPI_TEST_MAPCHECK");
+            for (String id : ids) {
+                if (t == null) failed.put(id, "can't check off the head unit");
+                else if (t.startsWith("fail:") && java.util.Arrays.asList(t.substring(5).split(",")).contains(id)) failed.put(id, "test: doesn't resolve");
+            }
+            return failed;
         }
         Map<String, Object> appFiles = (Map<String, Object>) m.carJson.get("app_files");
         Map<String, ClassLoader> loaders = new LinkedHashMap<String, ClassLoader>();
         ClassLoader boot = ClassLoader.getSystemClassLoader().getParent();
         Class<?> pcl = Class.forName("dalvik.system.PathClassLoader");
         Constructor<?> newPcl = pcl.getConstructor(String.class, ClassLoader.class);
-        List<String> failed = new ArrayList<String>();
-        int ok = 0;
-        for (Map.Entry<String, Map<String, Object>> en : m.points.entrySet()) {
-            String id = en.getKey(), app = m.appOf.get(id);
+        for (String id : ids) {
+            String app = m.appOf.get(id);
             try {
                 ClassLoader cl = loaders.get(app);
                 if (cl == null) {
@@ -71,27 +107,12 @@ final class MapCheck {
                     }
                     loaders.put(app, cl);
                 }
-                check(cl, m, id, en.getValue());
-                ok++;
+                check(cl, m, id, m.points.get(id));
             } catch (Throwable t) {
-                failed.add(id + ": " + t);
+                failed.put(id, String.valueOf(t));
             }
         }
-        Map<String, Object> rep = new LinkedHashMap<String, Object>();
-        rep.put("folder", m.folder);
-        rep.put("files", m.carJson.get("files"));
-        rep.put("ok", failed.isEmpty());
-        rep.put("points", (long) m.points.size());
-        rep.put("failed", new ArrayList<Object>(failed));
-        rep.put("date", new java.util.Date().toString());
-        rep.put("product", e.facts.get("product"));
-        Engine.write(new File(e.stateDir, "map-check.json"), Json.write(rep));
-        e.out.add("map " + m.folder + ": " + ok + " of " + m.points.size() + " hook points resolve in this car's apps");
-        for (String f : failed) e.out.add("  FAILED " + f);
-        e.out.add(failed.isEmpty() ? "map checked on this car: hooks run with it from the next start (report: state/map-check.json)"
-                        + (m.missing.isEmpty() ? "" : "; " + m.missing.size() + " point(s) aren't in it, their features and mods stay off")
-                : "the map doesn't fit this car; hooks stay off");
-        return failed.isEmpty() ? 0 : 1;
+        return failed;
     }
 
     static String owner(String id) {

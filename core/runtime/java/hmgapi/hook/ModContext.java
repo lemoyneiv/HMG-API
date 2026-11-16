@@ -45,7 +45,7 @@ public final class ModContext {
         if (mode == null) throw new IllegalStateException(id + ": hook point " + point + " isn't declared in mod.json");
         Guard g = new Guard(this, point, mode, hook);
         g.priority = "replace".equals(mode) ? 1 : 0;
-        return Points.hook(cl, point, g);
+        return Points.hookAs(cl, point, g, mode);
     }
 
     /** Keeps a mod's hook to what it declared. */

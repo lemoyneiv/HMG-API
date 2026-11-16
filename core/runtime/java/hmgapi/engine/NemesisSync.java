@@ -139,16 +139,31 @@ final class NemesisSync {
             if (list(e, nemesis, pkg, descriptor(d), new File(tpl, "mod/scripts"), id, listed.containsKey(pkg))) listed.put(pkg, mpv);
             else bad++;
         }
-        // listed in NEMESIS, gone from HMG-API
+        // listed in NEMESIS, gone from HMG-API. A mod's package can depend on another's (its
+        // "requires", tools/mknemesismod.sh), and NEMESIS won't unlist that one while it's
+        // listed (exit 4): go round until a round unlists nothing.
+        List<String> gone = new ArrayList<String>();
         for (String pkg : listed.keySet()) {
-            if (!pkg.startsWith("hmgapi.") || mods.containsKey(pkg.substring(7))) continue;
-            refresh(e, pkg, new File(tpl, "mod/scripts"));
-            Engine.Run r = nemesis(nemesis, "uninstall", pkg);
-            if (r.code == 0) e.out.add("NEMESIS sync: " + pkg + " isn't installed in HMG-API any more: unlisted it from NEMESIS");
-            else {
-                e.out.add("NEMESIS sync: couldn't unlist " + pkg + " from NEMESIS: " + last(r.text));
-                bad++;
+            if (pkg.startsWith("hmgapi.") && !mods.containsKey(pkg.substring(7))) gone.add(pkg);
+        }
+        Map<String, String> why = new LinkedHashMap<String, String>();
+        for (boolean more = true; more && !gone.isEmpty(); ) {
+            more = false;
+            why.clear();
+            for (java.util.Iterator<String> it = gone.iterator(); it.hasNext(); ) {
+                String pkg = it.next();
+                refresh(e, pkg, new File(tpl, "mod/scripts"));
+                Engine.Run r = nemesis(nemesis, "uninstall", pkg);
+                if (r.code == 0) {
+                    e.out.add("NEMESIS sync: " + pkg + " isn't installed in HMG-API any more: unlisted it from NEMESIS");
+                    it.remove();
+                    more = true;
+                } else why.put(pkg, last(r.text));
             }
+        }
+        for (Map.Entry<String, String> w : why.entrySet()) {
+            e.out.add("NEMESIS sync: couldn't unlist " + w.getKey() + " from NEMESIS: " + w.getValue());
+            bad++;
         }
         if (bad == 0) e.out.add("NEMESIS sync: NEMESIS lists HMG-API and its " + mods.size() + " mod(s)");
         return bad == 0 ? 0 : 1;

@@ -21,6 +21,11 @@ import java.util.Map;
  * A name this car's map doesn't have throws IllegalArgumentException: a map may
  * lack points (CarMap.missing), so code that hooks several points of an app first
  * checks complete(app) and stays off as a whole, never half hooked.
+ *
+ * Points this unit mapped itself (CarMap.local, not in HMG-API's map) are for reading
+ * (has, get, cls, readings) and mods' observe hooks. HMG-API's own hooks (need/needAll),
+ * calls and constructors use them only when the owner tries unchecked maps
+ * (CarMap.localOnly); until then they count as not mapped there.
  */
 public final class Points {
     private Points() {}
@@ -52,6 +57,10 @@ public final class Points {
      */
     static boolean needAll(String feature, String... ids) {
         for (String id : ids) {
+            if (localOnly(id)) {
+                HmgApi.i(feature + ": off on this car (" + id + " is mapped on this car only: HMG-API's hooks need it in HMG-API's map, or \"Try unchecked maps\")");
+                return false;
+            }
             if (!has(id)) {
                 HmgApi.i(feature + ": off on this car (" + id + " not mapped"
                         + (map != null && map.missing.containsKey(id) ? ": " + map.missing.get(id) : "") + ")");
@@ -66,9 +75,26 @@ public final class Points {
      * false and one line saying the feature is off here, and why.
      */
     static boolean need(String feature, String app) {
-        if (complete(app)) return true;
+        if (complete(app)) {
+            for (String id : map.localOnly()) {
+                if (CarMap.appOfId(id).equals(app)) {
+                    HmgApi.i(feature + ": off on this car (" + id + " is mapped on this car only: HMG-API's hooks need it in HMG-API's map, or \"Try unchecked maps\")");
+                    return false;
+                }
+            }
+            return true;
+        }
         HmgApi.i(feature + ": off on this car (" + app + " point " + (map == null ? "map" : map.firstMissing(app)) + " not mapped)");
         return false;
+    }
+
+    /** mapped on this unit only, and the owner doesn't try unchecked maps: reads and observe hooks only */
+    static boolean localOnly(String id) {
+        return map != null && map.localOnly().contains(id);
+    }
+
+    static void notLocal(String id, String what) {
+        if (localOnly(id)) throw new IllegalArgumentException(id + " is mapped on this car only: " + what + " needs it in HMG-API's map, or the owner's \"Try unchecked maps\"");
     }
 
     static Map<String, Object> entry(String id) {
@@ -146,6 +172,17 @@ public final class Points {
 
     /** Hooks a method or constructor point: HMG-API core only (mods hook through ModContext.hook, which checks their declaration). */
     static java.lang.reflect.Member hook(ClassLoader cl, String id, MethodHook hook) {
+        notLocal(id, "HMG-API's own hook");
+        return hookAny(cl, id, hook);
+    }
+
+    /** a mod's hook (ModContext.hook): an observe hook may use a point mapped on this car only */
+    static java.lang.reflect.Member hookAs(ClassLoader cl, String id, MethodHook hook, String mode) {
+        if (!"observe".equals(mode)) notLocal(id, "a " + mode + " hook");
+        return hookAny(cl, id, hook);
+    }
+
+    private static java.lang.reflect.Member hookAny(ClassLoader cl, String id, MethodHook hook) {
         java.lang.reflect.Member m = entry(id).containsKey("ctor") ? ctor(cl, id) : method(cl, id);
         Bridge.hookMethod(m, hook);
         return m;
@@ -153,6 +190,7 @@ public final class Points {
 
     /** Calls a method point (target null for a static one). */
     public static Object call(ClassLoader cl, String id, Object target, Object... args) {
+        notLocal(id, "a call");
         try {
             return method(cl, id).invoke(target, args);
         } catch (java.lang.reflect.InvocationTargetException e) {
@@ -172,6 +210,7 @@ public final class Points {
     }
 
     public static Object newInstance(ClassLoader cl, String id, Object... args) {
+        notLocal(id, "a constructor call");
         try {
             return ctor(cl, id).newInstance(args);
         } catch (java.lang.reflect.InvocationTargetException e) {

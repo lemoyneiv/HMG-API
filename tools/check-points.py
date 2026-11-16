@@ -13,7 +13,9 @@ points.txt (its hmgapi-mod-sdk zip, checked against the release's SHA256SUMS); a
 release before 1.1.0-beta.1 has no SDK, so it's the core/hookpoints/*.json at its tag.
 A final floor is met by a pre-release SDK of that release, as the engine takes it
 (Version.meetsHmgapi): ">=1.1.0" on a 1.1.0-rc.2 SDK, its points this SDK's own (the final
-is the last rc's code), so a mod's final can be released before core's.
+is the last rc's code), so a mod's final can be released before core's. A floor that is
+this SDK's own version uses its own points too, so a mod and the core release it needs
+can be built before that release is tagged.
 HMGAPI_FLOOR_POINTS=<file> uses that list instead of fetching one (tests, offline).
 """
 import glob, hashlib, io, json, os, re, subprocess, sys, tempfile, urllib.error, urllib.request, zipfile
@@ -114,6 +116,9 @@ def main(argv):
                   % (mid, m.get("version"), rng, "%d.%d.%d" % f[:3]))
             bad = 1; continue
         ahead = f is not None and not f[3] and sdk[3] and f[:3] == sdk[:3]   # ">=1.1.0" on a 1.1.0-rc SDK
+        # the floor is this SDK's own version (a mod and the core it needs released together,
+        # ">=1.1.0-rc.3" on the rc.3 SDK before its tag): its points are this SDK's own
+        ahead = ahead or (f is not None and key(f) == key(sdk))
         if f is not None and key(f) > key(sdk) and not ahead:
             print("FAIL  %s: \"hmgapi\": %r needs HMG-API %s, but the SDK is %s (pin a newer SDK in hmgapi-sdk.json)"
                   % (mid, rng, text(f), text(sdk)))

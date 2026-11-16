@@ -1,0 +1,168 @@
+{
+  "make": "kia",
+  "model": "kmc",
+  "name": "K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray",
+  "region": "kor",
+  "firmware": "260902",
+  "products": [
+    "CKPE.KOR.",
+    "CKPE22.KOR.",
+    "DE20EV.KOR.",
+    "DE22EV.KOR.",
+    "DE22HEV.KOR.",
+    "DE22PHEV.KOR.",
+    "DEEVPBV.KOR.",
+    "DEPEHEV.KOR.",
+    "DEPEPHEV.KOR.",
+    "DL3.KOR.",
+    "DL322.KOR.",
+    "DL3HEV.KOR.",
+    "DL3HEV22.KOR.",
+    "HMPE2.KOR.",
+    "JAPE.KOR.",
+    "JAPE22.KOR.",
+    "MQ4.KOR.",
+    "MQ422.KOR.",
+    "MQ422HEV.KOR.",
+    "MQ4HEV.KOR.",
+    "ON.KOR.",
+    "SK3.KOR.",
+    "SK321.KOR.",
+    "SK3EV.KOR.",
+    "SK3EV21.KOR.",
+    "SK3EV22.KOR.",
+    "SP2.KOR.",
+    "SP221.KOR.",
+    "SP222.KOR.",
+    "TAM.KOR.",
+    "TAM22.KOR.",
+    "YGPE.KOR.",
+    "YGPEHEV.KOR."
+  ],
+  "status": "mapped",
+  "verified": null,
+  "files": {
+    "/system/app/HKMC_BtSettings.odex": "3d4b71befa08eb8294b070f96a5c2e1d",
+    "/system/app/ButtonSettings.odex": "85b4975efedf45c184058a63c2c594cc",
+    "/system/app/HKMC_DiPO.odex": "b6c36634ebf49b45d84798b89cbfbf67",
+    "/system/framework/com.tcc.iap2.odex": "7412169aeb892de68b1e2aacf8d1cf2f",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/framework.odex": "eab5af504694910d946f9067310b744a",
+    "/system/framework/core.odex": "6fc32a2492fb97f77e13b5f8fe609af4",
+    "/system/framework/framework2.odex": "ad18c214d13478cd1ee877869ac9f00f",
+    "/system/framework/automotive.odex": "3f6c3bf1258723cfa2a6dc75280f19fb",
+    "/system/framework/com.hkmc.ext.hcan.odex": "13ba89d1a5f0d7834e710ce4b924df4a",
+    "/system/framework/automotive-service.odex": "bbae330d61bc117fbaccbd8252a9fd0b",
+    "/system/app/HKMC_GPM.odex": "def8588772f648a6acedbed8ecdcd5d8",
+    "/system/app/HKMC_HomeSetting_WP.odex": "9dd7759c12dcb3102d098d71f9a37512",
+    "/system/app/Iap2ServerApp.odex": "1252fd62faecba96941f2177bf36eb8b",
+    "/system/app/Launcher_WP3.odex": "5a6077645c2fcbee9c1afb3e4bc02687",
+    "/system/app/RightScreenHome.odex": "ab86e6a3153c937890a165c03b669741",
+    "/system/app/Settings_W.odex": "0a7d4e2db55f4d01e84a17fa19c6c315",
+    "/system/app/ThemeSettings.odex": "eb65292e7ddc4868db1a83b898340acf"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "names": {
+    "panel.test_gate.on": {
+      "method": "pB",
+      "params": [],
+      "ret": "boolean",
+      "static": true,
+      "sig": "c65792efa099ac9e"
+    },
+    "themesettings.split_item.type": {
+      "method": "gk",
+      "params": [],
+      "ret": "int",
+      "static": false,
+      "sig": "4425414b67eb43ee"
+    }
+  }
+}

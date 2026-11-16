@@ -48,6 +48,7 @@ final class Report {
             unit.put(k, e.facts.get(k));
         }
         unit.put("wifi_chip", e.facts.features().contains("hmgapi.wifi"));
+        unit.put("wifi", e.facts.wifi());   // seen, stock hotspot, unpowered (the hotspot feature off) or none
         unit.put("features", new ArrayList<Object>(e.facts.features()));
         r.put("unit", unit);
 
@@ -58,6 +59,8 @@ final class Report {
         mj.put("folder", map.folder);
         mj.put("hooks_on", map.runnable);
         mj.put("missing", notNoFiles(map.missing));
+        mj.put("mapped_here", new ArrayList<Object>(map.local));   // state/local-map.json: for a maintainer to make official
+        if (map.localWhy != null) mj.put("mapped_here_off", map.localWhy);
         r.put("map", mj);
 
         // this car mapped from its own files: names for a new map, or what changed on a known car
@@ -113,7 +116,7 @@ final class Report {
                     m.put("id", raw.get("id"));
                     m.put("version", raw.get("version"));
                     m.put("on", !new File(d, ".disabled").exists());
-                    String sys = raw.containsKey("system") ? SystemCheck.check(raw.get("system"), e.facts) : null;
+                    String sys = raw.containsKey("system") ? SystemCheck.check(raw.get("system"), e.facts, SystemCheck.asksHotspot(raw)) : null;
                     m.put("supports_this_car", sys == null);
                     if (sys != null) m.put("why_not", sys);
                     if (plan.refused.containsKey(d.getName())) m.put("hooks_not_loaded", plan.refused.get(d.getName()));

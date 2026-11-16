@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="hmgapi.app"
-    android:versionCode="14"
-    android:versionName="1.1.1-rc.2">
+    android:versionCode="15"
+    android:versionName="1.1.1-rc.3">
 
     <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="19" />
 
@@ -14,6 +14,7 @@
         android:icon="@drawable/ic_hmgapi"
         android:allowBackup="false"
         android:theme="@android:style/Theme.Holo.NoActionBar">
+        <meta-data android:name="hmgapi.feature.launcher_tiles" android:value="true" />
         <!-- no LAUNCHER category: the stock launcher only shows its built-in list;
              HMG-API's hooks add the tile and the star key choice -->
         <activity

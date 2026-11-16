@@ -8,6 +8,8 @@ says only what they say. --check: exit 1 if docs/hook-points.md isn't what this
 would write (core/hookpoints/test.sh runs it: change a point, run this again).
 """
 import glob, json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import maplib  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -18,12 +20,9 @@ STATUS = {'verified': 'checked on a car', 'mapped': 'mapped from stock files', '
 def cars():
     """[(label, status, set of mapped point ids)], in maps/ order"""
     out = []
-    for cj in sorted(glob.glob(os.path.join(REPO, 'maps', '*', '*', '*', '*', 'car.json'))):
-        d = os.path.dirname(cj)
-        car = json.load(open(cj))
-        mapped = set()
-        for app in car.get('apps', []):
-            mapped.update(json.load(open(os.path.join(d, app + '.json'))))
+    for d in maplib.folders():
+        car = json.load(open(os.path.join(d, 'car.json')))
+        mapped = set(maplib.entries(d))
         name = car.get('name') or car['model']
         if not name.lower().startswith(car['make'].lower()):
             name = car['make'].capitalize() + ' ' + name

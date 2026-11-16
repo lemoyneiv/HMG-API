@@ -1,0 +1,175 @@
+{
+  "make": "kia",
+  "model": "ev6",
+  "name": "EV6",
+  "region": "kor",
+  "firmware": "260902",
+  "products": [
+    "CVEV.KOR."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "18d35d028f7f701c38457e30b1477040",
+    "/system/app/HKMC_BtSettings.odex": "22363be5ef257cf78a9947f758b4899f",
+    "/system/app/HKMC_DiPO.odex": "caf67d3b49d8f8e5cbed4d46062bdf62",
+    "/system/app/HKMC_GPM.odex": "c060a43d7a9234acf3319fa05dd263b1",
+    "/system/app/HKMC_HomeSetting_WP.odex": "6706f5f6a6507f77fc415f69213be654",
+    "/system/app/Iap2ServerApp.odex": "a44a337b979f2af5251d7d30b75fe5e4",
+    "/system/app/Launcher_WP3.odex": "c7e245afe48da32086e2db19a047e631",
+    "/system/app/RightScreenHome.odex": "f8de5c01f082f7b97e3824b03fc9450f",
+    "/system/app/Settings_W.odex": "550007804afaa66ed3957d964cd39f6f",
+    "/system/app/ThemeSettings.odex": "a389e6b944f570874b4a03d70a97046f",
+    "/system/framework/automotive-service.odex": "80ee7af3692f393da1ed6d8fefa26108",
+    "/system/framework/automotive.odex": "27999ee273facc2ff1583377c213fb38",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "9b559da941b0dd1cd32015c307adc41e",
+    "/system/framework/com.tcc.iap2.odex": "71b4490695e60e6d8c4a8c52f107c098",
+    "/system/framework/core.odex": "8c278b9f4a4c15b2262e623f989cd5ff",
+    "/system/framework/framework.odex": "ecf1d427fcf907d094fc72f7c8900369",
+    "/system/framework/framework2.odex": "19fc288ce14e4d7702206bc5e90ea32d"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "btsettings.projection_helper.device_connections_available": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_device_connections": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_other_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_wireless_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "dipo.carplay.decode_failure": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.disable_bluetooth": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.force_key_frame": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.screen_timeout": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.bcm_service.batt_cond_indicator": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.car_services.cluster": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_listener": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_listener_stub": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_listener_stub.as_interface": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_listener_stub.battery_info": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_service": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_service.add_listener": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_service.battery_info": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_service_stub": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.cluster_service_stub.as_interface": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hev_flag.batt_cond_failure": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_saver": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_error": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_invalid": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_state": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "iap2.init_info.use_vehicle_information": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "iap2.init_info.use_vehicle_status": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "iap2.service.native_handle": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "iap2.service.native_lock": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "iap2.service.on_bind": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "iap2.service.on_destroy": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "panel.test_gate.on": "not confirmed: this map's name (py) was borrowed from the US maps; on this build the borrowed split_item.type didn't fit either, as on the Korean 260902 builds read from stock files, where py is another method (the switch is pB there); a Car Report from HMG-API with code signatures maps it",
+    "themesettings.split_item.type": "0 methods match in com.android.themesettings.splitscreensettings.SplitScreenItem"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.home.test_page",
+    "panel.test_gate",
+    "panel.test_page"
+  ],
+  "names": {
+    "homesetting.edit_list.items": {
+      "field": "cu",
+      "type": "java.util.List",
+      "static": true
+    }
+  },
+  "unconfirmed": [
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views"
+  ]
+}

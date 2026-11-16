@@ -30,6 +30,19 @@ import java.util.Map;
  * Maps: /data/hmgapi/maps/<make>/<model>/<region>/<firmware>/{car.json, <app>.json},
  * and /data/hmgapi/maps/points.txt (every point id in the catalogue). Used by the
  * hook runtime in the zygote and by the engine; plain Java (Json, java.io).
+ *
+ * What this unit mapped itself (MapProbe: engine map-car --local / --write) is in
+ * /data/hmgapi/state/local-map.json, outside maps/, which every HMG-API update replaces:
+ *   "points"     points HMG-API's map lacks only because it's older than them, found
+ *                here by name and checked here (MapCheck) before they were written. They
+ *                fill those gaps (never a point HMG-API's map has) while every stock file
+ *                they came from is unchanged; their ids are in local. Reads and mods'
+ *                observe hooks use them; anything else needs HMG-API's map, or the owner's
+ *                "Try unchecked maps" (localOnly()).
+ *   "whole"      this car mapped from its own files, for a car HMG-API has no map for, or
+ *                whose map doesn't fit its framework (mismatch): used as a probed map
+ *                (folder "local"), with the same md5 checks.
+ * The owner's switch settings/allow/no_local_points turns both off.
  */
 public final class CarMap {
     public String status = "none";
@@ -45,6 +58,29 @@ public final class CarMap {
     public final Map<String, String> appOf = new LinkedHashMap<String, String>();
     /** point id -> why this car's map doesn't have it */
     public final Map<String, String> missing = new LinkedHashMap<String, String>();
+    /** points this unit mapped itself (state/local-map.json "points"), not in HMG-API's map */
+    public final java.util.Set<String> local = new java.util.TreeSet<String>();
+    /** the owner's "Try unchecked maps" */
+    public boolean testing;
+    /** this unit's product and firmware */
+    String product, firmware;
+    /** why state/local-map.json isn't used, or null */
+    public String localWhy;
+
+    static final String LOCAL = "/data/hmgapi/state/local-map.json";
+
+    /** the reasons a shipped map gives for a point that's only newer than the map (what a unit may map itself) */
+    public static boolean olderMap(String why) {
+        return why != null && (why.startsWith("newer than") || why.startsWith("not in the Car Report"));
+    }
+
+    /**
+     * Points that only reads and mods' observe hooks may use here: those mapped on this
+     * unit only, unless the owner tries unchecked maps.
+     */
+    public java.util.Set<String> localOnly() {
+        return testing ? java.util.Collections.<String>emptySet() : local;
+    }
 
     /** the catalogue app a point belongs to: its id's first part ("themesettings.split_items.make") */
     public static String appOfId(String id) {
@@ -67,14 +103,36 @@ public final class CarMap {
         return null;
     }
 
-    @SuppressWarnings("unchecked")
     public static CarMap load(String root, SystemCheck.Facts facts, Map<String, Object> hmgapi) {
+        return load(root, facts, hmgapi, true);
+    }
+
+    /** useLocal false: HMG-API's map alone, as if this unit had mapped nothing itself (the mapper's view) */
+    @SuppressWarnings("unchecked")
+    public static CarMap load(String root, SystemCheck.Facts facts, Map<String, Object> hmgapi, boolean useLocal) {
         CarMap m = new CarMap();
         File maps = new File(root + "/data/hmgapi/maps");
         String product = facts.get("product"), firmware = facts.get("firmware");
+        m.product = product;
+        m.firmware = firmware;
+        m.testing = Boolean.TRUE.equals(hmgapi == null ? null : hmgapi.get("testing_maps"))
+                || new File(root + "/data/hmgapi/settings/allow/testing_maps").isFile();   // the app's switch (hmgapid allow)
+        Map<String, Object> local = null;
+        if (!useLocal) {
+            m.localWhy = "not used here";
+        } else if (new File(root + "/data/hmgapi/settings/allow/no_local_points").isFile()) {
+            m.localWhy = "the owner turned off maps made on this car";
+        } else if (new File(root + LOCAL).isFile()) {
+            try {
+                local = Json.object(Engine.read(new File(root + LOCAL)));
+            } catch (Exception e) {
+                m.localWhy = "can't read " + LOCAL + ": " + e;
+            }
+        }
         try {
             File dir = find(maps, product, firmware, m);
             if (dir == null) {
+                if (useWhole(root, m, local, product, firmware)) return finish(root, m, maps, local);
                 m.reason = "no hook map for this car (" + product + "): hooks are off, everything else runs";
                 return m;
             }
@@ -88,6 +146,18 @@ public final class CarMap {
                     m.appOf.put(e.getKey(), String.valueOf(app));
                 }
             }
+            return finish(root, m, maps, local);
+        } catch (Exception e) {
+            m.status = "none";
+            m.reason = "can't read the hook map: " + e;
+        }
+        return m;
+    }
+
+    /** the rest of load, for HMG-API's map or the whole map made on this unit (already in m) */
+    @SuppressWarnings("unchecked")
+    static CarMap finish(String root, CarMap m, File maps, Map<String, Object> local) {
+        try {
             // points the mapper didn't find, and points newer than the map
             Object listed = m.carJson.get("missing");
             if (listed instanceof Map) {
@@ -116,9 +186,10 @@ public final class CarMap {
                 String why = f.getKey() + " is " + live + ", but the map for " + m.car + " was made from " + want;
                 List<String> apps = appsUsing(appFiles, f.getKey());
                 if (apps.isEmpty() || apps.contains("framework")) {
-                    m.status = "mismatch";
-                    m.reason = why + ": hooks are off (another build of the framework needs its own map)";
                     saveMd5Cache(root, cache);
+                    if (!"local".equals(m.folder) && useWhole(root, m, local, m.product, m.firmware)) return finish(root, m, maps, local);
+                    m.status = "mismatch";
+                    m.reason = why + ": hooks are off (another build of the framework needs its own map: `hmgapid engine map-car --write` makes one on this car)";
                     return m;
                 }
                 for (String app : apps) drop(m, app, why);
@@ -126,8 +197,19 @@ public final class CarMap {
             saveMd5Cache(root, cache);
             m.status = String.valueOf(m.carJson.get("status"));
             m.checkedHere = checkedHere(root, m);
-            boolean testing = Boolean.TRUE.equals(hmgapi == null ? null : hmgapi.get("testing_maps"))
-                    || new File(root + "/data/hmgapi/settings/allow/testing_maps").isFile();   // the app's switch (hmgapid allow)
+            if (!"local".equals(m.folder)) {
+                try {
+                    mergeLocal(root, m, local, cache);
+                } catch (Exception e) {   // the map runs as HMG-API made it
+                    m.localWhy = "can't use " + LOCAL + ": " + e;
+                    for (String id : m.local) {
+                        m.points.remove(id);
+                        m.appOf.remove(id);
+                    }
+                    m.local.clear();
+                }
+            }
+            boolean testing = m.testing;
             if ("verified".equals(m.status)) {
                 m.runnable = true;
             } else if (("mapped".equals(m.status) || "probed".equals(m.status)) && (m.checkedHere || testing)) {
@@ -143,6 +225,62 @@ public final class CarMap {
             m.reason = "can't read the hook map: " + e;
         }
         return m;
+    }
+
+    /**
+     * The whole map made on this unit (local-map.json "whole") in place of HMG-API's (none
+     * for this car, or one that doesn't fit its framework): true if it's for this unit's
+     * product and firmware.
+     */
+    @SuppressWarnings("unchecked")
+    static boolean useWhole(String root, CarMap m, Map<String, Object> local, String product, String firmware) {
+        if (local == null || !Boolean.TRUE.equals(local.get("whole"))) return false;
+        if (product == null || firmware == null || !firmware.equals(String.valueOf(local.get("firmware")))) return false;
+        boolean fits = false;
+        Object ps = local.get("products");
+        if (ps instanceof List) for (Object p : (List<Object>) ps) if (product.startsWith(String.valueOf(p))) fits = true;
+        if (!fits) return false;
+        m.points.clear();
+        m.appOf.clear();
+        m.missing.clear();
+        m.folder = "local";
+        m.carJson = local;
+        m.car = local.get("name") + " (" + local.get("region") + " " + local.get("firmware") + ", mapped on this car)";
+        for (Map.Entry<String, Object> e : ((Map<String, Object>) local.get("points")).entrySet()) {
+            m.points.put(e.getKey(), (Map<String, Object>) e.getValue());
+            m.appOf.put(e.getKey(), appOfId(e.getKey()));
+        }
+        return true;
+    }
+
+    /**
+     * local-map.json "points" into HMG-API's map: each only where the map lacks it because
+     * the map is older, and only while every stock file of its app is the one it was found
+     * in (the md5s the unit saw then are the car's now).
+     */
+    @SuppressWarnings("unchecked")
+    static void mergeLocal(String root, CarMap m, Map<String, Object> local, Map<String, Object> cache) {
+        if (local == null || Boolean.TRUE.equals(local.get("whole")) || !(local.get("points") instanceof Map)) return;
+        Map<String, Object> files = (Map<String, Object>) local.get("files");
+        Map<String, Object> appFiles = (Map<String, Object>) m.carJson.get("app_files");
+        for (Map.Entry<String, Object> e : ((Map<String, Object>) local.get("points")).entrySet()) {
+            String id = e.getKey(), app = appOfId(id);
+            if (m.points.containsKey(id) || !olderMap(m.missing.get(id))) continue;
+            Object af = appFiles == null ? null : appFiles.get(app);
+            Object fs = af instanceof Map ? ((Map<String, Object>) af).get("files") : null;
+            if (!(fs instanceof List) || files == null) continue;
+            boolean same = true;
+            for (Object f : (List<Object>) fs) {
+                String p = String.valueOf(f), live = md5Cached(root, p, cache), backup = md5(new File(root + "/data/hmgapi/stock" + p));
+                Object seen = files.get(p);
+                if (seen == null || !(seen.equals(live) || seen.equals(backup))) same = false;
+            }
+            if (!same) continue;
+            m.points.put(id, (Map<String, Object>) e.getValue());
+            m.appOf.put(id, app);
+            m.missing.remove(id);
+            m.local.add(id);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -275,6 +413,7 @@ public final class CarMap {
     /** One line for logs and the app. */
     public String describe() {
         return "hook map: " + status + (car == null ? "" : " for " + car) + (runnable ? ", hooks on" : ", hooks off")
+                + (runnable && !local.isEmpty() ? ", " + local.size() + " point(s) mapped on this car" + (testing ? "" : " (reads and observe hooks)") : "")
                 + (runnable && !missing.isEmpty() ? ", " + missing.size() + " point(s) not mapped (their features and mods are off)" : "")
                 + (reason == null ? "" : " (" + reason + ")");
     }

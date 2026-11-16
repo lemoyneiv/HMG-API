@@ -34,7 +34,10 @@ author key, car). A mod that doesn't list your car isn't installed; to install i
 anyway, at your own risk, add an empty file `HMGAPI/ANY-CAR` to the stick.
 Uninstalling the package in NEMESIS Manager removes the mod and puts its files back
 to stock. While a mod package is installed, NEMESIS won't uninstall HMG-API:
-uninstall the mod packages first.
+uninstall the mod packages first. A mod that needs another mod (one that builds on
+the Wireless CarPlay + Android Auto mod, say) works the same way: NEMESIS won't install it
+until the mod it needs is installed and new enough, and won't uninstall that one while
+it's there.
 
 ### Over adb, from a computer
 

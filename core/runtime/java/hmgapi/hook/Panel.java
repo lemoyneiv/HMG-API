@@ -127,7 +127,7 @@ final class Panel {
         Points.hook(cl, "panel.test_page.get_view", new MethodHook() {
             @Override
             protected void beforeHookedMethod(Param p) {
-                if (p.thisObject == page && host != null) p.setResult(host.view);
+                if (p.thisObject == page && host != null) p.setResult(host.ui());
             }
         });
         if (app.context == null) return;
@@ -150,7 +150,7 @@ final class Panel {
         Points.field(cl, "panel.page.context").set(pg, host.context);
         Points.field(cl, "panel.page.handler").set(pg, new Handler(Looper.getMainLooper()));
         Points.field(cl, "panel.page.view_id").set(pg, SLOT);
-        Points.field(cl, "panel.page.view").set(pg, host.view);
+        Points.field(cl, "panel.page.view").set(pg, host.ui());
         Points.field(cl, "panel.home.test_page").set(home, pg);
         page = pg;
         HmgApi.i("panel: HMG-API's page is in slot " + SLOT);
@@ -172,13 +172,22 @@ final class Panel {
         }
     }
 
-    /** HMG-API's page: a header (title, ‹ ›) over the chosen mod's widget */
+    /**
+     * HMG-API's page: a header (title, ‹ ›) over the chosen mod's widget.
+     *
+     * Its views are made only when the panel first builds HMG-API's page (ui()), never
+     * when the process starts. A TextView with text makes the process load its fonts,
+     * and Skia builds the process's fallback font list once, on that first use: made
+     * at start (after handleBindApplication), it came before the Mobis font's
+     * framework-level fallback, so the whole panel lost the Mobis font for Korean
+     * text, even with no mod page (#174, Avante CN7 KOR 260902).
+     */
     static final class Host {
         final Context context;
         final AppWidgetHost widgets;
-        final LinearLayout view;
-        final TextView title, prev, next;
-        final FrameLayout body;
+        LinearLayout view;   // null until ui()
+        TextView title, prev, next;
+        FrameLayout body;
         final Map<ComponentName, AppWidgetHostView> shown = new LinkedHashMap<ComponentName, AppWidgetHostView>();
         List<Page> pages = new ArrayList<Page>();
         int current;
@@ -192,6 +201,12 @@ final class Panel {
                 HmgApi.e("panel: widget host", t);
             }
             widgets.startListening();
+        }
+
+        /** the page's views, made on first use (see the class comment) */
+        LinearLayout ui() {
+            if (view != null) return view;
+            Context c = context;
             view = new LinearLayout(c);
             view.setOrientation(LinearLayout.VERTICAL);
             LinearLayout head = new LinearLayout(c);
@@ -217,6 +232,9 @@ final class Panel {
             body = new FrameLayout(c);
             view.addView(head);
             view.addView(body, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            HmgApi.i("panel: HMG-API's page views made");
+            show(current);
+            return view;
         }
 
         static TextView label(Context c, String s) {
@@ -237,6 +255,7 @@ final class Panel {
         }
 
         void show(int i) {
+            if (view == null) return;   // not shown yet: ui() shows the current page when it's made
             body.removeAllViews();
             boolean many = pages.size() > 1;
             prev.setVisibility(many ? View.VISIBLE : View.INVISIBLE);

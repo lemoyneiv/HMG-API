@@ -1,0 +1,149 @@
+{
+  "make": "hyundai",
+  "model": "hmc",
+  "name": "Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22",
+  "region": "usa",
+  "firmware": "260507",
+  "products": [
+    "AEPEEV.USA.",
+    "AEPEHEV.USA.",
+    "AEPEPHEV.USA.",
+    "CN7.USA.",
+    "CN723.USA.",
+    "CN7HEV.USA.",
+    "CN7HEV23.USA.",
+    "DN8.USA.",
+    "DN822.USA.",
+    "DN822HEV.USA.",
+    "DN823.USA.",
+    "DN823HEV.USA.",
+    "DN8HEV.USA.",
+    "JSN.USA.",
+    "LX2.USA.",
+    "OSEV.USA.",
+    "OSPE.USA.",
+    "OSPE23.USA.",
+    "QX21.USA.",
+    "TM23.USA.",
+    "TMFL.USA.",
+    "TMHEV.USA.",
+    "TMHEV23.USA.",
+    "TMPHEV.USA.",
+    "TMPHEV23.USA."
+  ],
+  "status": "mapped",
+  "verified": null,
+  "files": {
+    "/system/app/HKMC_BtSettings.odex": "7e5cc22943bdb580a3bfe0308b3764a4",
+    "/system/app/ButtonSettings.odex": "0797854ff463b6cc3397849e00c85906",
+    "/system/app/HKMC_DiPO.odex": "a2661eab1a6800761e825eb87d68f140",
+    "/system/framework/com.tcc.iap2.odex": "56e8e037f78e8dedd5625a5ab7ae4b8f",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/framework.odex": "03077d875962a65efd4679b76ca75f90",
+    "/system/framework/core.odex": "26808746014a21e160b28b132c65e7e1",
+    "/system/framework/framework2.odex": "dba8f4b4b734262d091eb7e5f92872b6",
+    "/system/framework/automotive.odex": "0991b7af01146bf54f3fcc8e1b73ca68",
+    "/system/framework/com.hkmc.ext.hcan.odex": "00e09314fde78131921923805b62f917",
+    "/system/framework/automotive-service.odex": "ce1b71f2420faf624f1a77eae9c8f5a5",
+    "/system/app/HKMC_GPM.odex": "3288dc674e8c69e3250351eb2d9c812c",
+    "/system/app/HKMC_HomeSetting_WP.odex": "0fd2f30f8c6fbee392322c8c71bc7901",
+    "/system/app/Iap2ServerApp.odex": "ca77dff5d8aa9a0720ad9f86cd1fab73",
+    "/system/app/Launcher_WP3.odex": "9d2b0639a6fe30e5c6892b009c4e6398",
+    "/system/app/RightScreenHome.odex": "4b299b74ee9851fee1043ed6ae24bf97",
+    "/system/app/Settings_W.odex": "46af1a29da4af0a57827d1661b7edc93",
+    "/system/app/ThemeSettings.odex": "6281da235c421c1c4514f3cdb4db9ff3"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "names": {
+    "btsettings.projection_helper": {
+      "class": "com.android.settings2.bluetooth.iO"
+    }
+  }
+}

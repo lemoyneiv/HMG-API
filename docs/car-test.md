@@ -76,6 +76,14 @@ press SOS.
      reboot`.
    - After the restart the app says the hook runtime is running, with the map
      checked on this car.
+4. Points newer than the map (only on a car whose map lists some as missing:
+   `adb shell hmgapid engine map` says how many aren't mapped):
+   ```
+   adb shell hmgapid engine map-car --local
+   ```
+   - **Expect:** "N point(s) HMG-API's map … lacks, mapped and checked on this car", no
+     "didn't resolve" line for a by-name point. After a restart, `engine map` says "N
+     point(s) mapped on this car (reads and observe hooks)". **Note:** the output.
 
 ## 2. Mods in, the app's controls
 

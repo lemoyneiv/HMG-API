@@ -167,7 +167,16 @@
         "group": "gate_m",
         "params": [],
         "ret": "boolean",
-        "static": true
+        "static": true,
+        "site": {
+          "in": "com.mobis.splitscreen.right.SplitScreenHome",
+          "next": [
+            "move-result",
+            "if-eqz",
+            "iget-object",
+            "goto"
+          ]
+        }
       },
       "about": "Mobis' test switch for slot 22 (always off on a car; HMG-API answers true only inside page_for_id and build_views)"
     }

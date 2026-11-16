@@ -1,0 +1,144 @@
+{
+  "make": "hyundai",
+  "model": "hmc",
+  "name": "Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22",
+  "region": "can",
+  "firmware": "260206",
+  "products": [
+    "AEPEEV.CAN.",
+    "AEPEHEV.CAN.",
+    "AEPEPHEV.CAN.",
+    "CN723.CAN.",
+    "CN7.CAN.",
+    "CN7HEV23.CAN.",
+    "CN7HEV.CAN.",
+    "DN822.CAN.",
+    "DN822HEV.CAN.",
+    "DN823.CAN.",
+    "DN823HEV.CAN.",
+    "DN8.CAN.",
+    "DN8HEV.CAN.",
+    "JSN.CAN.",
+    "LX2.CAN.",
+    "OSEV.CAN.",
+    "OSPE23.CAN.",
+    "OSPE.CAN.",
+    "QX21.CAN.",
+    "TM23.CAN.",
+    "TMFL.CAN.",
+    "TMHEV23.CAN.",
+    "TMHEV.CAN.",
+    "TMPHEV23.CAN.",
+    "TMPHEV.CAN."
+  ],
+  "status": "mapped",
+  "verified": null,
+  "files": {
+    "/system/app/HKMC_BtSettings.odex": "bda250d3073d1e1a0823dccfbc2561b1",
+    "/system/app/ButtonSettings.odex": "0797854ff463b6cc3397849e00c85906",
+    "/system/app/HKMC_DiPO.odex": "a557538824192f1658b1a17a2b319e87",
+    "/system/framework/com.tcc.iap2.odex": "c572a5766062225513daea472c38aa09",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/framework.odex": "e5cc44eb17e8226761ccbf7fc41f8625",
+    "/system/framework/core.odex": "400f470d75e1d50355e8ce43cb82b0e6",
+    "/system/framework/framework2.odex": "995ac1697f36c613bbfb9f3e7051c230",
+    "/system/framework/automotive.odex": "3062920642cde523a17b500740d109cb",
+    "/system/framework/com.hkmc.ext.hcan.odex": "a4e72130ec2f82be2a1f4cfb6352a2bc",
+    "/system/framework/automotive-service.odex": "c2966bdb7d0d02d23513274253dda8a6",
+    "/system/app/HKMC_GPM.odex": "5570e3bb1e6d0cb6f4799aba16a9e96a",
+    "/system/app/HKMC_HomeSetting_WP.odex": "de299ab72d89a6eb342593c846ff26d1",
+    "/system/app/Iap2ServerApp.odex": "ca77dff5d8aa9a0720ad9f86cd1fab73",
+    "/system/app/Launcher_WP3.odex": "c8ef75ca364c85c1020b8dc2030741ab",
+    "/system/app/RightScreenHome.odex": "8fca00b8fa0d6a7230e035509fba992e",
+    "/system/app/Settings_W.odex": "46af1a29da4af0a57827d1661b7edc93",
+    "/system/app/ThemeSettings.odex": "ff240cfc36c27d887001cf5cfb4bd2fe"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  }
+}

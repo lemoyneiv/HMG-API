@@ -14,6 +14,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from importlib import import_module
 th = import_module('test-hooks')
+import maplib  # noqa: E402
 
 
 def main():
@@ -49,7 +50,9 @@ def main():
                     want.update(json.load(open(f)))
             # the committed maps of other cars, as references
             maps = os.path.join(t, 'maps-' + label)
-            shutil.copytree(os.path.join(REPO, 'maps'), maps, ignore=shutil.ignore_patterns('coverage.json'))
+            maplib.expand(maps)   # the per-app files the unit reads (the repo keeps base + differences)
+            if os.path.isfile(os.path.join(maps, 'coverage.json')):
+                os.remove(os.path.join(maps, 'coverage.json'))
             if os.path.isfile(os.path.join(maps, label, 'car.json')):   # the car's own map
                 shutil.rmtree(os.path.join(maps, label))
             r = subprocess.run(['java', '-cp', cp, 'hmgapi.engine.MapProbe', tree, os.path.join(REPO, 'core', 'hookpoints'), maps],
@@ -60,8 +63,10 @@ def main():
             got = json.loads(r.stdout)
             pts, miss, byref = got['points'], got['missing'], got['by_reference']
             diff = 0
-            # smali-only points with no other car's map to borrow names from: missing, as expected
-            noref = {pid for pid, why in miss.items() if pid in want and ('no other car' in why or why.startswith('needs '))}
+            # smali-only points with no other car's map to borrow names from, or whose code several
+            # methods share: missing, as expected
+            noref = {pid for pid, why in miss.items() if pid in want and ('no other car' in why or why.startswith('needs ')
+                                                                           or "needs this car's map" in why)}
             for pid in sorted(set(want) | set(pts)):
                 if pid in noref:
                     continue

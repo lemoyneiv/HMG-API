@@ -41,4 +41,29 @@ mod y '{"launcher.menu_list.load": "replace"}' '["z"]'
 eng plan; has "required mods load first, then by id" "launcher.menu_list.load: a (change), b (observe), z (observe), y (replace)" "$out"
 mod f '{"launcher.menu_list.load": "rewrite"}'
 eng plan; has "unknown mode refused" "mode \"rewrite\" (observe, change or replace)" "$out"
+rm -r $R/data/hmgapi/mods/*
+
+# "conflicts" between mods that only hook (no patches.json: the patch engine never sees them)
+hookonly() {   # hookonly <id> <extra mod.json>
+    mkdir -p $R/data/hmgapi/mods/$1
+    printf '{"id": "%s", "version": "1.0.0", "hooks": {"jar": "hooks.jar", "entry": "x.X", "points": {"launcher.menu_list.load": "observe"}}%s}\n' "$1" "$2" > $R/data/hmgapi/mods/$1/mod.json
+}
+hookonly full ', "requires": ["wire"], "conflicts": ["lite"]'
+hookonly lite ', "conflicts": ["full"]'
+hookonly wire ''
+eng plan; check "plan with two mods that list each other" 0 $rc
+has "the second in load order won't load, and why" "hooks    lite won't load: conflict: lite 1.0.0 and full 1.0.0 can't run together (each lists the other in \"conflicts\"); full loads, turn it off to use lite instead" "$out"
+hasnt "the first loads" "full won't load" "$out"
+has "only the first's hooks are planned" "launcher.menu_list.load: wire (observe), full (observe) share it" "$out"
+: > $R/data/hmgapi/mods/wire/.disabled
+eng plan; has "a mod whose requirement is off won't load" "hooks    full won't load: requires wire, which isn't installed and turned on" "$out"
+hasnt "... and the other loads in its place" "lite won't load" "$out"
+rm $R/data/hmgapi/mods/wire/.disabled
+: > $R/data/hmgapi/mods/full/.disabled
+eng plan; hasnt "the first turned off: the other loads" "won't load" "$out"
+rm -r $R/data/hmgapi/mods/*
+
+# the mod loader's own decisions (hook.Mods: boot and live loads), on a mods folder
+javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" core/runtime/test/hmgapi/engine/HookPlanTest.java
+mkdir -p $T/loader; java -cp "$CP" hmgapi.engine.HookPlanTest $T/loader || fail=1
 exit $fail

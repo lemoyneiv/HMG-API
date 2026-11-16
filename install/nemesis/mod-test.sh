@@ -107,6 +107,34 @@ done
 mk 1.0.0 on $T/author.key "$EV6" '"nemesis_conflicts": ["hmgapi"], ' 2>/dev/null || true
 set +e; o=$(tools/mknemesismod.sh $T/demo.zip $T/dist 2>&1); r=$?; set -e
 has "... refusing the HMG-API it needs: refused" "both needs and refuses hmgapi" "$o"
+# the mods it requires (mod.json "requires"): hmgapi.<id>@>=<the range's lowest version, as a package-version>
+mk 1.0.0 on $T/author.key "$EV6" '"requires": ["wireless-carplay-aa >=2.1.0"], '
+check "a required mod goes in depends as hmgapi.<id>@>=<lowest>" "hmgapi@>=1.0,hmgapi.wireless-carplay-aa@>=2.1.0" "$(val depends)"
+mk 1.0.0 on $T/author.key "$EV6" '"requires": ["base ^2.2.0-rc.1", {"id": "lib", "version": ">=1.2 <2"}, "any", "base >=2.0"], ' 2> $T/err
+check "... a pre-release floor as its package-version; an object entry; no range: any version; one entry each, the highest floor" \
+    "hmgapi@>=1.0,hmgapi.base@>=2.1.99.1,hmgapi.lib@>=1.2.0,hmgapi.any" "$(val depends)"
+has "... what NEMESIS can't check (^, an upper bound) is said" "requires base ^2.2.0-rc.1; its NEMESIS package checks only hmgapi.base@>=2.1.99.1, HMG-API checks the rest" "$(cat $T/err)"
+has "... both of them" "requires lib >=1.2 <2; its NEMESIS package checks only hmgapi.lib@>=1.2.0" "$(cat $T/err)"
+check "... and nothing for a plain >=" "" "$(mk 1.0.0 on $T/author.key "$EV6" '"requires": ["base >=2.0"], ' 2>&1)"
+mk 1.0.0 on $T/author.key "$EV6" '"requires": ["base >=2.0"], "nemesis_conflicts": ["mine.pkg"], '
+check "... before the refusals" "hmgapi@>=1.0,hmgapi.base@>=2.0.0,!mine.pkg" "$(val depends)"
+mk 1.0.0 on $T/author.key "$EV6" '"requires": [{"id": "extra", "version": "^3.0", "optional": true, "adds": "more"}, {"id": "base", "version": ">=2.0", "optional": false}], "nemesis_conflicts": ["hmgapi.extra"], ' 2> $T/err || true
+check "an optional requires (\"optional\": true, the mod runs without it): left out, so not refused either" "hmgapi@>=1.0,hmgapi.base@>=2.0.0,!hmgapi.extra" "$(val depends)"
+check "... and no note about its range" "" "$(cat $T/err)"
+for bad in '"Not-An-Id >=1.0"' '"hmgapi >=1.0"' '"demo"' '"base >=2.0-foo"' '"base >=x"'; do
+    mk 1.0.0 on $T/author.key "$EV6" "\"requires\": [$bad], " 2>/dev/null || true
+    set +e; o=$(tools/mknemesismod.sh $T/demo.zip $T/dist 2>&1); r=$?; set -e
+    check "requires [$bad]: refused" 1 "$([ $r -ne 0 ] && echo 1)"
+    has "... says why" 'mod.json "requires"' "$o"
+done
+mk 1.0.0 on $T/author.key "$EV6" '"requires": ["other"], "nemesis_conflicts": ["hmgapi.other"], ' 2>/dev/null || true
+set +e; o=$(tools/mknemesismod.sh $T/demo.zip $T/dist 2>&1); r=$?; set -e
+check "a mod requiring a mod whose package it refuses: refused" 1 "$([ $r -ne 0 ] && echo 1)"
+has "... says why" "both needs and refuses hmgapi.other: it's in \"requires\"" "$o"
+L=$(i=0; while [ $i -lt 9 ]; do printf '"mod-with-a-rather-long-name-for-the-limit-%02d >=1.0.0-rc.1", ' $i; i=$((i + 1)); done)
+mk 1.0.0 on $T/author.key "$EV6" "\"requires\": [${L%, }], " 2>/dev/null || true
+set +e; o=$(tools/mknemesismod.sh $T/demo.zip $T/dist 2>&1); r=$?; set -e
+has "requires making depends= longer than NEMESIS takes: refused" "NEMESIS takes at most 511" "$o"
 mk 1.0.0 on $T/author.key
 check "os from the mod's system" "CVEV.USA.*.260507" "$(val os)"
 check "name, with no double quotes left in it" "Demo 'quoted' mod" "$(val name)"

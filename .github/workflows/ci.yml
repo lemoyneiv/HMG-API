@@ -3,7 +3,8 @@
 # at once (tools/test-all.sh); a change to documentation only (docs/, wiki/, *.md, issue
 # forms) runs nothing. Every test, weekly and on demand (Actions > CI > Run workflow),
 # with ImageMagick for tools/mkicon-test.sh and the downloads built. The fast tier
-# (tools/test-all.sh --fast, what contributors run) on macOS too, so it keeps working there.
+# (tools/test-all.sh --fast, what contributors run) on macOS too, so it keeps working there:
+# on a PR only when it changes something a Mac runs differently (scripts, tools, installers).
 # No private files: the loader links against stand-ins (core/loader/syslib-stubs.sh),
 # the app is signed with a throwaway key, tests that need stock car files skip.
 name: CI
@@ -21,9 +22,17 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR cancels its older runs: no queue of stale runs waiting for
+# runners (macOS ones are scarce). Pushes to main and the weekly run are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-24.04
+    outputs:
+      macos: ${{ steps.pick.outputs.macos }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,6 +57,15 @@ jobs:
             tests="all"   # schedule, manual run, first push: everything
           fi
           echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          # what can behave differently on a Mac: shell scripts, Python and other tools,
+          # the installers and the build (BSD sed/grep/find, bash 3.2); maps, the catalogue
+          # and Java alone can't. A PR runs fast-macos only for those (main and the weekly run: always)
+          if [ -z "$range" ] || grep -Eq '\.(sh|py)$|^tools/|^install/|^build\.sh$|^\.github/workflows/ci\.yml$' changed.txt; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos=false" >> "$GITHUB_OUTPUT"
+            echo "fast-macos: skipped, nothing a Mac runs differently changed" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "### Tests: ${tests:-none (nothing they cover changed)}" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
@@ -102,7 +120,10 @@ jobs:
 
   # tools/test-all.sh --fast where most contributors are: no ARM toolchain, no build
   fast-macos:
+    needs: test
+    if: github.event_name != 'pull_request' || needs.test.outputs.macos == 'true'
     runs-on: macos-15
+    timeout-minutes: 30   # the fast tier takes ~2 min; a hung run ends (a queued job is ended by GitHub)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

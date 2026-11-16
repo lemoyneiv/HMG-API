@@ -67,10 +67,30 @@ release builds one for each mod in `tools/release-mods.txt` (fetched from its ca
 off-car with the real engine.
 
 - id `hmgapi.<mod id>` (mod ids are at most 57 characters for this),
-  `depends="hmgapi@>=1.0"` plus the mod's incompatibilities (below; NEMESIS then also
-  refuses to uninstall HMG-API while a mod package is installed),
+  `depends="hmgapi@>=1.0"`, then the mods it requires (next item), then its
+  incompatibilities (below; NEMESIS then also refuses to uninstall HMG-API while a mod
+  package is installed),
   `os` from the mod's `"system"` (a firmware range like `>=260206` becomes `*`),
   `package-version` from the mod's version (`tools/nemesis-version.py`).
+- **Required mods:** each `mod.json` `"requires"` entry becomes `hmgapi.<id>@>=<floor>`,
+  the floor being the lowest version its range lets in, as a package-version:
+  `"wireless-carplay-aa >=2.1.0"` is `hmgapi.wireless-carplay-aa@>=2.1.0`, `"base
+  ^2.2.0-rc.1"` is `hmgapi.base@>=2.1.99.1`, and a range with no lower bound (none, `*`,
+  `<3`) is plain `hmgapi.<id>`. An optional entry (`{"id": ..., "optional": true}`: the mod
+  runs without it) is left out. NEMESIS then won't install the mod until those are
+  installed and new enough (exit 22), and won't uninstall them while it's there (exit 4).
+  NEMESIS checks only the floor. The rest of a range (`^`, `~`, an exact version, `>`
+  taken as `>=`, an upper bound) stays HMG-API's check, as for a mod installed from the
+  HMG-API app. The build prints a note when it leaves part of a range out. An upper bound in NEMESIS would also block every update of
+  the required mod's package past it (exit 21). The build refuses an entry that isn't a
+  mod id, a mod that requires itself, a range with no package-version
+  (`tools/nemesis-version.py`'s forms), a mod that requires a mod and refuses its
+  package, and a `depends` over NEMESIS's 511 characters. HMG-API's NEMESIS sync
+  (NEMESIS 1.16 or newer) lists mods installed from the HMG-API app as `hmgapi.<id>` too,
+  so a required mod counts however it was installed. Unlisting goes round until nothing
+  more comes off (the sync, and HMG-API's uninstall before `hmgapi` itself), since NEMESIS
+  won't unlist a package another one needs; a required mod removed in the HMG-API app
+  stays listed in NEMESIS, and the sync says why, until the mod needing it is removed.
 - `preinstall`: refuses before NEMESIS copies anything if HMG-API isn't installed
   (`/system/bin/hmgapid` and `/data/hmgapi/uninstall.sh`).
 - `postinstall`: `hmgapid engine install mod/package.zip` (plus `--any-car` with

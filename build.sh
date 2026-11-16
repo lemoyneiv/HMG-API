@@ -107,7 +107,9 @@ payload() {
     cp install/nemesis/bin/open.sh install/nemesis/bin/start.sh "$P/nemesis/bin/"
     cp install/nemesis/conflicts.txt "$P/nemesis/conflicts.txt"
     # the hook maps, with every point id in the catalogue (a map missing one isn't used)
-    cp -r maps "$P/maps"
+    # the repo keeps one base map plus each build's differences (tools/maplib.py); the unit
+    # reads every build's full per-app files, as before
+    python3 tools/maplib.py expand "$P/maps" || exit 1
     rm -f "$P/maps/coverage.json"   # tools/test-hooks.py's baseline, for the repo only
     # the catalogue itself: the on-car mapper (engine map-car) finds points by their shapes
     mkdir -p "$P/maps/catalogue" && cp core/hookpoints/*.json "$P/maps/catalogue/"

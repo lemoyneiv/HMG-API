@@ -358,4 +358,41 @@ touch $R/data/hmgapi/mods/wa/.disabled $R/data/hmgapi/mods/wb/.disabled
 eng apply
 check "both off: feature gone" no "$([ -f $R/system/etc/permissions/android.hardware.wifi.xml ] && echo yes || echo no)"
 check "... state back" "" "$(grep persist.wifi.state $R/settings.txt)"
+
+# ---- Wi-Fi hotspot: the stock hotspot feature, which makes the unit power its Wi-Fi chip
+rm -rf $R/data/hmgapi/mods/* $R/data/hmgapi/state $R/data/hmgapi/stock
+HS=$R/system/etc/permissions/com.hkmc.software.wifihotspot.xml
+printf '%s\n' "-/system/etc/permissions/com.hkmc.software.wifihotspot.xml" "-/system/etc/permissions/x.xml" > $R/system/onebin/cvev_us/featurexml.cfg
+CFG=$(md5 $R/system/onebin/cvev_us/featurexml.cfg)
+for m in ha hb; do mkdir -p $R/data/hmgapi/mods/$m; printf '{"id": "%s", "version": "1.0.0", "wifi": {"hotspot": true}}\n' $m > $R/data/hmgapi/mods/$m/mod.json; done
+eng apply
+check "no hotspot file (Korean units): two mods ask, applies" 0 $rc
+check "... HMG-API's feature file" '<permissions>
+    <feature name="com.hkmc.software.wifihotspot" />
+</permissions>' "$(cat $HS 2>/dev/null)"
+has "... its featurexml line commented" "#-/system/etc/permissions/com.hkmc.software.wifihotspot.xml" "$(cat $R/system/onebin/cvev_us/featurexml.cfg)"
+eng apply
+has "... applied again: nothing to do" "nothing to do" "$out"
+touch $R/data/hmgapi/mods/ha/.disabled $R/data/hmgapi/mods/hb/.disabled
+eng apply
+check "both off: the file goes" absent "$(md5 $HS)"
+check "... featurexml.cfg stock again" "$CFG" "$(md5 $R/system/onebin/cvev_us/featurexml.cfg)"
+# a car whose stock software has the file (deleted at boot by its featurexml line, or not)
+printf '<?xml version="1.0" encoding="utf-8"?>\n<permissions>\n<feature name="com.hkmc.software.wifihotspot"/>\n</permissions>\n' > $HS
+HSM=$(md5 $HS)
+rm $R/data/hmgapi/mods/ha/.disabled
+eng apply
+check "stock hotspot file: applies" 0 $rc
+check "... the stock file stays as it is" "$HSM" "$(md5 $HS)"
+has "... only its featurexml line commented" "#-/system/etc/permissions/com.hkmc.software.wifihotspot.xml" "$(cat $R/system/onebin/cvev_us/featurexml.cfg)"
+touch $R/data/hmgapi/mods/ha/.disabled
+eng apply
+check "... off: featurexml.cfg stock again" "$CFG" "$(md5 $R/system/onebin/cvev_us/featurexml.cfg)"
+check "... and the stock file still there" "$HSM" "$(md5 $HS)"
+rm -f $HS
+rm -rf $R/data/hmgapi/mods/*
+mkdir -p $R/data/hmgapi/mods/hc; printf '{"id": "hc", "version": "1.0.0", "wifi": {"hotspot": "yes"}}\n' > $R/data/hmgapi/mods/hc/mod.json
+eng plan
+has "\"wifi\" with another value: refused, with the form" '"wifi": {"client": true} and/or {"hotspot": true}' "$out"
+rm -rf $R/data/hmgapi/mods/hc
 exit $fail

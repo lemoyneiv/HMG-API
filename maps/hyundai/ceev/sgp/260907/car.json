@@ -1,0 +1,208 @@
+{
+  "make": "hyundai",
+  "model": "ceev",
+  "name": "Ioniq 6",
+  "region": "sgp",
+  "firmware": "260907",
+  "products": [
+    "CEEV.SGP."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "32d1c05edc971f6906b8ae056bd6a085",
+    "/system/app/HKMC_BtSettings.odex": "ea69bb9a2c30137c19bd817300efb201",
+    "/system/app/HKMC_DiPO.odex": "36bee627fe331fbd19f79fa5722fc171",
+    "/system/app/HKMC_GPM.odex": "787675f3fbadc4d908ebecf5cd618b45",
+    "/system/app/HKMC_HomeSetting_WP.odex": "4d8a517137568bc54edcdb9ae1a5a619",
+    "/system/app/Iap2ServerApp.odex": "5546bb2dab281ca2dcb5f445aca4a237",
+    "/system/app/Launcher_WP3.odex": "af3667f787ca962d8795b76a656567d4",
+    "/system/app/RightScreenHome.odex": "59a2bc54258073d8c470c8b6de625e4a",
+    "/system/app/Settings_W.odex": "84ab0fd8592ebeb2a62b16b75450dacc",
+    "/system/app/ThemeSettings.odex": "7fcb23af3743ffcddc63620bdbd0bd42",
+    "/system/framework/automotive-service.odex": "7b64138d8a8ef2f39fb49d66cb5cc4f5",
+    "/system/framework/automotive.odex": "154d71db3bf9e7560758e323af6482a4",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "b82de95acb0daf7fc876a43f63eb2c32",
+    "/system/framework/com.tcc.iap2.odex": "912d2ad604534b55b62e119ec622d2c1",
+    "/system/framework/core.odex": "aa7fcd3b610f3fc6f18f067be3e638a2",
+    "/system/framework/framework.odex": "645df0eb02f892c93d0a9f7d235cf419",
+    "/system/framework/framework2.odex": "1626e83de2ff7096fc048944c475cb22"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "btsettings.projection_helper.device_connections_available": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_device_connections": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_other_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_wireless_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "buttonsettings.adapter": "0 classes match",
+    "buttonsettings.adapter.set_boolean_list": "needs buttonsettings.adapter",
+    "buttonsettings.adapter.set_list_items": "needs buttonsettings.adapter",
+    "buttonsettings.head_screen.adapter": "0 fields match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.checked_list": "0 fields match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.cur_list": "0 fields match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.init_custom_key": "0 methods match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.keycode": "0 fields match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.list_item": "0 methods match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.menu_list": "0 fields match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.set_selected": "0 methods match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.head_screen.title_list": "0 fields match in com.android.buttonsettings.CustomButtonSetting",
+    "buttonsettings.item": "0 classes match",
+    "buttonsettings.item.get_shortcut": "needs buttonsettings.item",
+    "buttonsettings.item.new": "needs buttonsettings.item",
+    "buttonsettings.row": "0 classes match",
+    "buttonsettings.row.is_check": "needs buttonsettings.row",
+    "buttonsettings.row.set_check": "needs buttonsettings.row",
+    "buttonsettings.wheel_screen.adapter": "0 fields match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.checked_list": "0 fields match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.cur_list": "0 fields match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.init_custom_key": "0 methods match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.keycode": "0 fields match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.list_item": "0 methods match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.menu_list": "0 fields match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.set_selected": "0 methods match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "buttonsettings.wheel_screen.title_list": "0 fields match in com.android.buttonsettings.CustomButtonSettingSWRC",
+    "iap2.init_info": "0 classes match",
+    "iap2.init_info.check_supports_features": "needs iap2.init_info",
+    "iap2.init_info.route_guidance": "needs iap2.init_info",
+    "iap2.init_info.use_vehicle_information": "needs iap2.init_info",
+    "iap2.init_info.use_vehicle_status": "needs iap2.init_info",
+    "iap2.service.get_component": "0 methods match in com.tcc.iap2server.Iap2Service",
+    "iap2.service.native_handle": "0 fields match in com.tcc.iap2server.Iap2Service",
+    "iap2.service.receive_connect": "0 methods match in com.tcc.iap2server.Iap2Service",
+    "iap2.service.receive_disconnect": "0 methods match in com.tcc.iap2server.Iap2Service",
+    "iap2.service.set_device_serial": "0 methods match in com.tcc.iap2server.Iap2Service",
+    "panel.home.test_page": "0 fields match in com.mobis.splitscreen.right.SplitScreenHome",
+    "panel.test_gate.on": "not confirmed: this map's name (py) was borrowed from the US maps; on this build the borrowed split_item.type didn't fit either, as on the Korean 260902 builds read from stock files, where py is another method (the switch is pB there); a Car Report from HMG-API with code signatures maps it",
+    "settings.split_screen.supported": "0 methods match in com.android.settings.util.SplitScreenUtils",
+    "themesettings.split_item.type": "0 methods match in com.android.themesettings.splitscreensettings.SplitScreenItem"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.test_gate",
+    "panel.test_page"
+  ],
+  "names": {
+    "dipo.iap2_client.manager": {
+      "field": "N",
+      "type": "com.daudio.app.dipo.e.b",
+      "static": false
+    },
+    "dipo.iap2_listener.owner": {
+      "field": "mO",
+      "type": "com.daudio.app.dipo.e.a",
+      "static": false
+    },
+    "dipo.session_listener": {
+      "class": "com.daudio.app.dipo.service.r"
+    },
+    "homesetting.edit_list.items": {
+      "field": "ct",
+      "type": "java.util.List",
+      "static": true
+    },
+    "iap2.service_receiver": {
+      "class": "com.tcc.iap2server.f"
+    },
+    "iap2.service_receiver.service": {
+      "field": "bX",
+      "type": "com.tcc.iap2server.Iap2Service",
+      "static": false
+    }
+  },
+  "unconfirmed": [
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views"
+  ]
+}

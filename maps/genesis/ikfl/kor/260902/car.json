@@ -1,0 +1,154 @@
+{
+  "make": "genesis",
+  "model": "ikfl",
+  "name": "G70",
+  "region": "kor",
+  "firmware": "260902",
+  "products": [
+    "IKFL.KOR."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "46b9683a699a996f508cfab6efaa2c29",
+    "/system/app/HKMC_BtSettings.odex": "235340cdb3f1fff8f6afc00b263a6319",
+    "/system/app/HKMC_DiPO.odex": "c5bb1502eed018c9d13e87167a4cec3f",
+    "/system/app/HKMC_GPM.odex": "d8905fa58017472706b69c88abc46917",
+    "/system/app/HKMC_HomeSetting_WP.odex": "5bd380a52783ad76ddce7ba0ae67f9a1",
+    "/system/app/Iap2ServerApp.odex": "9b26a6f16bf4f9633493b5107c0e7e86",
+    "/system/app/Launcher_WP3.odex": "35d1624376ccde5db8652d78990eb14c",
+    "/system/app/RightScreenHome.odex": "fafbc9e91428bdedd133e5c4e34f621c",
+    "/system/app/Settings_W.odex": "001792f376d33cea8fe3fcf1192d1dd0",
+    "/system/app/ThemeSettings.odex": "d8ac03e8511ba51ce6418e8a6373fe35",
+    "/system/framework/automotive-service.odex": "f8d7e5ca5f02652d8727631fe00c7267",
+    "/system/framework/automotive.odex": "05a63aacb68fddd4f31f3ab737638c77",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "883f205c9f85326afefca364cbfcea7c",
+    "/system/framework/com.tcc.iap2.odex": "fff8c238ddba4570acbff7dd7d7aab67",
+    "/system/framework/core.odex": "a306ea26b4469c2ffe431ac72200cb77",
+    "/system/framework/framework.odex": "d90de7c30ca4207f3779d9dd31644dce",
+    "/system/framework/framework2.odex": "9d44fa95539e3213246d8d986db809aa"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "dipo.carplay.decode_failure": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.disable_bluetooth": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.force_key_frame": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "dipo.carplay.screen_timeout": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_saver": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_error": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_invalid": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "framework.hscan_service.battery_12v_sensor_state": "not in the Car Report: newer than the HMG-API that made it (a Car Report from a newer HMG-API maps it)",
+    "panel.test_gate.on": "not confirmed: this map's name (py) was borrowed from the US maps, and on the Korean 260902 builds read from stock files that name is another method (the gate is pB there); a Car Report from HMG-API with code signatures maps it",
+    "themesettings.split_item.type": "0 methods match in com.android.themesettings.splitscreensettings.SplitScreenItem"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "btsettings.projection_helper.device_connections_available",
+    "btsettings.projection_helper.open_device_connections",
+    "btsettings.projection_helper.open_other_page",
+    "btsettings.projection_helper.open_wireless_page",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.home.test_page",
+    "panel.test_gate",
+    "panel.test_page"
+  ],
+  "unconfirmed": [
+    "btsettings.projection_helper.device_connections_available",
+    "btsettings.projection_helper.open_device_connections",
+    "btsettings.projection_helper.open_other_page",
+    "btsettings.projection_helper.open_wireless_page",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views"
+  ]
+}

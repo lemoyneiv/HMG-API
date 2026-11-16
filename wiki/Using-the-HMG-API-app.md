@@ -26,8 +26,8 @@ Every installed mod, with its state:
 | Colour | Meaning |
 |---|---|
 | 🟢 green | on and running |
-| 🟡 yellow | a conflict: two mods replace the same thing; turn one off |
-| 🔴 red | not running on this car (it needs a hook point your car's map doesn't have yet), or an error. It says why; a [Car Report](Car-Report) helps get it added |
+| 🟡 yellow | a conflict: two mods replace the same thing, or one says it can't run with the other; turn one off |
+| 🔴 red | not running on this car (it needs a hook point your car's map doesn't have yet), a mod it needs is missing or off, or an error. It says why; a [Car Report](Car-Report) helps get a missing hook point added |
 | ⚪ grey | off |
 
 Pick a mod for its switch, its settings, its log (HMG-API's lines for it and its

@@ -1,0 +1,155 @@
+{
+  "make": "kia",
+  "model": "sg2ev",
+  "name": "Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024",
+  "region": "can",
+  "firmware": "260206",
+  "products": [
+    "BDPE.CAN.",
+    "KA4.CAN.",
+    "NQ5.CAN.",
+    "NQ5HEV.CAN.",
+    "NQ5PHEV.CAN.",
+    "ONPE.CAN.",
+    "SG2EV.CAN.",
+    "SG2HEV.CAN.",
+    "SG2PHEV.CAN.",
+    "SK3EPE.CAN.",
+    "SK3PE.CAN.",
+    "SP2PE.CAN."
+  ],
+  "status": "probed",
+  "verified": null,
+  "files": {
+    "/system/app/ButtonSettings.odex": "f239d4bbb4f78d637bcf20b653254b16",
+    "/system/app/HKMC_BtSettings.odex": "10499006defefddd6cd375620dfbdce8",
+    "/system/app/HKMC_DiPO.odex": "49e892b7790c19548a2e1f7141987ca3",
+    "/system/app/HKMC_GPM.odex": "c4f751a36be916e72cf93df0436d63c2",
+    "/system/app/HKMC_HomeSetting_WP.odex": "8b4170bb891bf53478495bac5b3d326a",
+    "/system/app/Iap2ServerApp.odex": "f3e22d94150de40f4ed603798358b0e3",
+    "/system/app/Launcher_WP3.odex": "5f73466280ad954432c751e1307d8714",
+    "/system/app/RightScreenHome.odex": "1b4724aea6042e805209bcdb3dbe87c9",
+    "/system/app/Settings_W.odex": "40b6ef93bc1100f957becadd0bbfc54c",
+    "/system/app/ThemeSettings.odex": "79ff2e3a08192d5ccdd246ccf39ad67a",
+    "/system/framework/automotive-service.odex": "452de4c254187e16a495e41b03ca6904",
+    "/system/framework/automotive.odex": "c08ee753b357b2b88c27972ddef895e1",
+    "/system/framework/com.broadcom.bt.jar": "dbf374aa8bde80fad95746a67719ce51",
+    "/system/framework/com.hkmc.ext.hcan.odex": "69552aa8183441b69f3e4b895418913f",
+    "/system/framework/com.tcc.iap2.odex": "3a72f2b6e0cfc7b165aa928c6ceea6f1",
+    "/system/framework/core.odex": "b16fa6517d7f6fb98dd5a77d7640fd53",
+    "/system/framework/framework.odex": "c242edf3aa6cffc93f6d62fb7e2f86a1",
+    "/system/framework/framework2.odex": "cca8a5ddb7cd3382706940195a72b5c0"
+  },
+  "apps": [
+    "btsettings",
+    "buttonsettings",
+    "dipo",
+    "framework",
+    "gpm",
+    "homesetting",
+    "iap2",
+    "launcher",
+    "panel",
+    "settings",
+    "themesettings"
+  ],
+  "app_files": {
+    "btsettings": {
+      "package": "com.android.btsettings",
+      "files": [
+        "/system/app/HKMC_BtSettings.odex"
+      ]
+    },
+    "buttonsettings": {
+      "package": "com.android.buttonsettings",
+      "files": [
+        "/system/app/ButtonSettings.odex"
+      ]
+    },
+    "dipo": {
+      "package": "com.daudio.app.dipo",
+      "files": [
+        "/system/app/HKMC_DiPO.odex",
+        "/system/framework/com.tcc.iap2.odex",
+        "/system/framework/com.broadcom.bt.jar"
+      ]
+    },
+    "framework": {
+      "package": null,
+      "files": [
+        "/system/framework/framework.odex",
+        "/system/framework/core.odex",
+        "/system/framework/framework2.odex",
+        "/system/framework/automotive.odex",
+        "/system/framework/com.hkmc.ext.hcan.odex",
+        "/system/framework/automotive-service.odex"
+      ]
+    },
+    "gpm": {
+      "package": "com.google.android.projection.sink",
+      "files": [
+        "/system/app/HKMC_GPM.odex"
+      ]
+    },
+    "homesetting": {
+      "package": "com.hkmc.system.app.homesetting",
+      "files": [
+        "/system/app/HKMC_HomeSetting_WP.odex"
+      ]
+    },
+    "iap2": {
+      "package": "com.tcc.iap2server",
+      "files": [
+        "/system/app/Iap2ServerApp.odex"
+      ]
+    },
+    "launcher": {
+      "package": "com.android.launcher3",
+      "files": [
+        "/system/app/Launcher_WP3.odex"
+      ]
+    },
+    "panel": {
+      "package": "com.mobis.splitscreen.right",
+      "files": [
+        "/system/app/RightScreenHome.odex"
+      ]
+    },
+    "settings": {
+      "package": "com.android.settings",
+      "files": [
+        "/system/app/Settings_W.odex"
+      ]
+    },
+    "themesettings": {
+      "package": "com.android.themesettings",
+      "files": [
+        "/system/app/ThemeSettings.odex"
+      ]
+    }
+  },
+  "missing": {
+    "btsettings.projection_helper.device_connections_available": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_device_connections": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_other_page": "0 methods match in com.android.settings2.bluetooth.iP",
+    "btsettings.projection_helper.open_wireless_page": "0 methods match in com.android.settings2.bluetooth.iP"
+  },
+  "by_reference": [
+    "btsettings.projection_helper",
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.home.test_page",
+    "panel.test_gate",
+    "panel.test_gate.on",
+    "panel.test_page",
+    "themesettings.split_item.type"
+  ],
+  "unconfirmed": [
+    "dipo.iap2.bt_address",
+    "dipo.iap2.set_notify_on",
+    "panel.home.build_views",
+    "panel.test_gate.on",
+    "themesettings.split_item.type"
+  ]
+}

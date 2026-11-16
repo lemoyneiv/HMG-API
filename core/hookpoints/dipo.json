@@ -287,7 +287,10 @@
         "pattern": "session_bt_address",
         "group": "address",
         "params": [],
-        "ret": "java.lang.String"
+        "ret": "java.lang.String",
+        "site": {
+          "virtual": true
+        }
       },
       "about": "the phone's Bluetooth address from iAP2 identification (null after an iAP2 drop)"
     },
