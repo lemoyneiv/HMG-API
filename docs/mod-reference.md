@@ -402,7 +402,7 @@ yours again.
 ## Building a mod outside this repo
 
 A mod in its own repository builds with the HMG-API mod SDK, `hmgapi-mod-sdk-<version>.zip`
-on each HMG-API release from 1.0.3 (or `./build.sh sdk` here, into `out/dist`). Put the
+on each HMG-API release from 1.1.0, its betas and release candidates included (or `./build.sh sdk` here, into `out/dist`). Put the
 mod in a folder named by its id (`my-mod/mod.json`), with `README.md`, `LICENSE` and
 `.github/` at the repository root: everything in the mod folder but `build.sh`,
 `test.sh`, `src`, `tools` and `native` goes into the package.
@@ -412,8 +412,8 @@ Pin the SDK in `hmgapi-sdk.json` at the root, and call HMG-API's mod workflow fr
 
 | Pin | `hmgapi-sdk.json` | Workflow at |
 |---|---|---|
-| until 1.0.3 | `{"ref": "<HMG-API commit SHA>"}`: built from that commit | `@<that SHA>` |
-| from 1.0.3 | `{"version": "1.0.3", "sha256": "<the zip's, from SHA256SUMS>"}` | `@v1.0.3` |
+| a commit (between releases) | `{"ref": "<HMG-API commit SHA>"}`: built from that commit | `@<that SHA>` |
+| a release (from 1.1.0-beta.1) | `{"version": "1.1.0", "sha256": "<the zip's, from SHA256SUMS>"}` | `@v1.1.0` |
 
 The workflow checks the mod's `"hmgapi"` floor (at or below the SDK; every
 `hooks.points` entry in that release's points), builds it, runs its `test.sh` and

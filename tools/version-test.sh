@@ -38,6 +38,29 @@ check "check-points: mod rc, floor rc.1, SDK 1.1.0" 0 "$(floor 1.1.0 2.2.0-rc.1 
 check "check-points: mod rc, floor rc.1, SDK beta.1: fails" 1 "$(floor 1.1.0-beta.1 2.2.0-rc.1 '>=1.1.0-rc.1')"
 check "check-points: mod rc, floor 1.1.0, SDK rc.1 (as the engine: rc.1 meets >=1.1.0)" 0 "$(floor 1.1.0-rc.1 2.2.0-rc.1 '>=1.1.0')"
 check "check-points: final mod, floor 1.1.0, SDK rc.2 (a mod's final before core's)" 0 "$(floor 1.1.0-rc.2 2.2.0 '>=1.1.0')"
+# ... where a floor's hook points come from: the release's SDK zip from 1.1.0-beta.1 (the first
+# with one), the catalogue at its tag before; a floor that isn't a release fails with a line
+# saying so, not a traceback (">=1.0.3": the release planned under that name became 1.1.0)
+src() {   # src <floor>: "git" or "sdk" (what was asked for), then check-points.py's last line
+    echo 1.1.0-rc.1 > "$CP/sdk/VERSION"
+    printf '{"id": "m", "version": "2.2.0-rc.1", "hmgapi": ">=%s", "hooks": {"points": {"a.b": "observe"}}}\n' "$1" > "$CP/m/m/mod.json"
+    python3 - "$CP/sdk/bin/check-points.py" "$CP/m/m" <<'PY'
+import contextlib, io, runpy, subprocess, sys, urllib.error
+cp = runpy.run_path(sys.argv[1])
+g = cp["main"].__globals__
+def no_git(*a, **k): print("git"); raise subprocess.CalledProcessError(128, a[0])
+def no_net(*a, **k): print("sdk"); raise urllib.error.URLError("no network in the test")
+g["subprocess"].run, g["urllib"].request.urlopen = no_git, no_net
+o = io.StringIO()
+with contextlib.redirect_stdout(o):
+    rc = cp["main"]([sys.argv[2]])
+lines = o.getvalue().split("\n")
+print(lines[0], rc, lines[1][:60])
+PY
+}
+check "check-points: a floor before the first SDK (1.0.2): the catalogue at its tag" "git 1 FAIL  m: \"hmgapi\": '>=1.0.2': can't get HMG-API 1.0.2's hook" "$(src 1.0.2)"
+check "check-points: floor 1.0.3, never a release: said in one line, no traceback" "git 1 FAIL  m: \"hmgapi\": '>=1.0.3': can't get HMG-API 1.0.3's hook" "$(src 1.0.3)"
+check "check-points: floor 1.1.0-beta.1, the first release with an SDK: its SDK zip" "sdk 1 FAIL  m: \"hmgapi\": '>=1.1.0-beta.1': can't get HMG-API 1.1.0" "$(src 1.1.0-beta.1)"
 check "check-points: final mod, floor 1.2.0, SDK 1.1.0-rc.2: fails" 1 "$(floor 1.1.0-rc.2 2.2.0 '>=1.2.0')"
 check "check-points: final mod, floor rc.1: fails" 1 "$(floor 1.1.0 2.2.0 '>=1.1.0-rc.1')"
 check "check-points: final mod, floor 1.1.0, SDK 1.1.0" 0 "$(floor 1.1.0 2.2.0 '>=1.1.0')"

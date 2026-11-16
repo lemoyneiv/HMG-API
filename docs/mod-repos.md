@@ -4,7 +4,12 @@ The mods HMG-API ships (`tools/release-mods.txt`: `wireless-carplay-aa`, `adb`,
 `nemesis-shortcut`) and `adbd` live in their own repositories in the Open-HMG org, one
 repo per mod (section 1). The other `mods/examples` stay in core as API examples and
 test fixtures. Hook points and maps stay in core. Sections 2 to 11 are the plan the split
-followed; what's still open is "Before 1.0.3" and releasing the SDK (section 11).
+followed.
+
+**The release this page calls 1.0.3 came out as 1.1.0** (it adds features: `docs/releasing.md`).
+The mod SDK has been a release asset since 1.1.0-beta.1, so wherever this page says "from
+1.0.3", read "from 1.1.0", and a mod's `"hmgapi"` floor is never `">=1.0.3"`: there is no
+such release (`">=1.1.0"`). "Before 1.0.3" below is how it was done until then.
 
 ## Decided (2026-11-07)
 

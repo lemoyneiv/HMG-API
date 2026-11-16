@@ -2,12 +2,12 @@
 #
 #   jobs:
 #     mod:
-#       uses: Open-HMG/HMG-API/.github/workflows/mod.yml@<HMG-API commit SHA>   # @v1.0.3 from 1.0.3
+#       uses: Open-HMG/HMG-API/.github/workflows/mod.yml@<HMG-API commit SHA>   # or @v1.1.0, a release's tag
 #
 # It reads the mod repo's hmgapi-sdk.json, the HMG-API mod SDK it builds with:
 #   {"ref": "<HMG-API commit SHA>"}           HMG-API checked out there, ./build.sh sdk (the only
-#                                             form until a release carries an SDK: 1.0.3)
-#   {"version": "1.0.3", "sha256": "<hex>"}   the release's hmgapi-mod-sdk-<version>.zip, refused
+#                                             form for a commit between releases)
+#   {"version": "1.1.0", "sha256": "<hex>"}   the release's hmgapi-mod-sdk-<version>.zip, refused
 #                                             unless its sha256 is this one
 # Then, for each mod: its "hmgapi" floor and hook points (bin/check-points.py), the build
 # (bin/build-mod.sh), its test.sh and tools/*/test.sh (with HMGAPI_SDK and HMGAPI_MOD_BUILD),
@@ -100,7 +100,7 @@ jobs:
               print("SDK: built from %s at %s" % (os.environ["REPO"], p["ref"]))
           elif set(p) == {"version", "sha256"}:
               if not re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?", p["version"]) or not re.fullmatch(r"[0-9a-f]{64}", p["sha256"]):
-                  sys.exit('hmgapi-sdk.json: "version" is a release (1.0.3), "sha256" 64 hex digits')
+                  sys.exit('hmgapi-sdk.json: "version" is a release (1.1.0), "sha256" 64 hex digits')
               out.write("form=release\nversion=%s\nsha256=%s\n" % (p["version"], p["sha256"]))
               print("SDK: release %s" % p["version"])
           else:

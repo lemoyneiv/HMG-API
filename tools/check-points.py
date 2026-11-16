@@ -10,16 +10,16 @@ For each mod: the floor (the lower bound of "hmgapi": ">=1.0.2", "^1.0.2", "~1.0
 is at or below this SDK's VERSION (semver precedence: an rc.2 SDK meets an rc.1 floor),
 a mod's final release has a final floor (docs/releasing.md), and every point in hooks.points is in the floor release's list of points. That list is the release's SDK
 points.txt (its hmgapi-mod-sdk zip, checked against the release's SHA256SUMS); a
-release before 1.0.3 has no SDK, so it's the core/hookpoints/*.json at its tag.
+release before 1.1.0-beta.1 has no SDK, so it's the core/hookpoints/*.json at its tag.
 A final floor is met by a pre-release SDK of that release, as the engine takes it
 (Version.meetsHmgapi): ">=1.1.0" on a 1.1.0-rc.2 SDK, its points this SDK's own (the final
 is the last rc's code), so a mod's final can be released before core's.
 HMGAPI_FLOOR_POINTS=<file> uses that list instead of fetching one (tests, offline).
 """
-import glob, hashlib, io, json, os, re, subprocess, sys, tempfile, urllib.request, zipfile
+import glob, hashlib, io, json, os, re, subprocess, sys, tempfile, urllib.error, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FIRST_SDK = (1, 0, 3, "")
+FIRST_SDK = (1, 1, 0, "beta.1")   # the first release with hmgapi-mod-sdk-<version>.zip
 
 
 def ver(s):
@@ -124,7 +124,13 @@ def main(argv):
             print("FAIL  %s: uses hook points, so \"hmgapi\" needs a floor (\">=1.0.2\"), not %r" % (mid, rng))
             bad = 1; continue
         if text(f) not in cache:
-            cache[text(f)] = own_points() if ahead and not os.environ.get("HMGAPI_FLOOR_POINTS") else fetch_points(f, repo)
+            try:
+                cache[text(f)] = own_points() if ahead and not os.environ.get("HMGAPI_FLOOR_POINTS") else fetch_points(f, repo)
+            except (subprocess.CalledProcessError, urllib.error.URLError, OSError, KeyError, zipfile.BadZipFile) as e:
+                # a floor that isn't a release (">=1.0.3": there never was one), or no network
+                print("FAIL  %s: \"hmgapi\": %r: can't get HMG-API %s's hook points (%s). Is %s a HMG-API release? "
+                      "Its floor is the release that first has the mod's hook points." % (mid, rng, text(f), e, text(f)))
+                bad = 1; continue
         missing = [p for p in points if p not in cache[text(f)]]
         if missing:
             print("FAIL  %s: not in HMG-API %s's hook points: %s (raise \"hmgapi\" to the release that has them)"

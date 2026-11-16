@@ -41,7 +41,7 @@ Owners get to decide for their own units. Follow these by default. If the user a
 | `install/` | `adb/`, `nemesis/` (`mod/`: the template for a mod as a NEMESIS package, `tools/mknemesismod.sh`), `usb/` (DSP OTA), `common/` (`install.sh`, `uninstall.sh`, `lib.sh`: where every route ends). |
 | `mods/examples` | `hello` and the other API examples and test fixtures. No shipped mod is in this repo: `wireless-carplay-aa`, `adb`, `nemesis-shortcut` and `adbd` each have their own, `Open-HMG/hmgapi-<id>` (wireless: `hmgapi-wireless-cp-aa`, id unchanged) (`docs/mod-repos.md`). |
 | `catalog/` | the mod catalogue (`tools/catalog.py`): per mod its download, SHA-256 and author key; the wiki's Community mods page. The release bundles `tools/release-mods.txt`'s ids from it. |
-| `tools/sdk`, `./build.sh sdk` | the mod SDK (`hmgapi-mod-sdk-<version>.zip`, a release asset from 1.0.3): what a mod repo builds, tests and packages with; `.github/workflows/mod.yml` is their reusable CI. |
+| `tools/sdk`, `./build.sh sdk` | the mod SDK (`hmgapi-mod-sdk-<version>.zip`, a release asset from 1.1.0-beta.1): what a mod repo builds, tests and packages with; `.github/workflows/mod.yml` is their reusable CI. |
 | `tools/` | `lpatch`, `mkrecipe.py`, `mkdelta.py`, `mkicon.sh` (stock-style tile pictures; `mkicon-hmgapi.sh` makes HMG-API's own from the logo), `env.sh`, `test-all.sh`; `map-car.py` (partial maps), `test-hooks.py` (points × cars, `maps/coverage.json`), `probe-test.py` (on-car mapper vs map-car.py); `cars.py` (stock trees in `$HMGAPI_CARS`, default `~/hmg-cars`: `list`, `test --report`; `docs/car-trees.md`). |
 
 ## Gotchas learned the hard way

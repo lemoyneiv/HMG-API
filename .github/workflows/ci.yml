@@ -125,7 +125,7 @@ jobs:
           { echo '### Fast tier (macOS)'; echo '```'; grep -E '^(ok|skip|FAIL) |^[0-9]+ ok' "$RUNNER_TEMP/tests.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   # The reusable mod workflow (mod.yml), as a mod repo calls it, on mods/examples/hello,
-  # with the SDK built from this commit (the {"ref": ...} pin every mod repo uses until 1.0.3)
+  # with the SDK built from this commit (the {"ref": ...} form of a mod repo's pin; the other form is a release's SDK zip)
   mod-workflow:
     uses: ./.github/workflows/mod.yml
     with:
