@@ -14,10 +14,12 @@
     },
     "28ad71e0-07c0-8e61-8bf3-380cc71f9280": {
       "name": "lemoyneiv",
-      "projects": "Gen5W Suite, Comfort & Startup (hmgapi-comfort), Brake Light Indicator, Light Vibes (intense-effects), HMG-API BLE & Home Screen Tiles",
+      "projects": "Gen5W Suite, Comfort & Startup (hmgapi-comfort), Home Screen Tile Manager (hmgapi-tile-manager), Brake Light Indicator, Light Vibes (intense-effects), HMG-API BLE",
       "repos": [
         "https://github.com/lemoyneiv/HMG-API",
         "https://github.com/lemoyneiv/gen5w-suite",
+        "https://github.com/lemoyneiv/hmgapi-comfort",
+        "https://github.com/lemoyneiv/hmgapi-tile-manager",
         "https://github.com/lemoyneiv/brake-indicator-gen5w",
         "https://github.com/lemoyneiv/light-vibes"
       ]

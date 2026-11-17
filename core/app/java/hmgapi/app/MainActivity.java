@@ -107,26 +107,7 @@ public class MainActivity extends Activity {
         content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
-        applyIntent(getIntent(), true);
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        applyIntent(intent, false);
-    }
-
-    private void applyIntent(Intent intent, boolean initial) {
-        String cat = intent == null ? null : intent.getStringExtra("settings_cat");
-        if (cat != null && !cat.isEmpty()) {
-            SettingsTab.selectCategory(cat);
-            show(intent.getIntExtra("tab", 1));
-        } else if (initial) {
-            show(intent == null ? 0 : intent.getIntExtra("tab", 0));
-        } else if (intent != null && intent.hasExtra("tab")) {
-            show(intent.getIntExtra("tab", 0));
-        }
+        show(getIntent().getIntExtra("tab", 0));
     }
 
     @Override

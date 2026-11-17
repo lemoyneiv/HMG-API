@@ -59,7 +59,7 @@ import java.util.TreeMap;
  * names the lpatch binary.
  */
 public final class Engine {
-    public static final String HMGAPI_VERSION = "1.1.1-rc.3";
+    public static final String HMGAPI_VERSION = "1.1.1-rc.4";
     /**
      * The release a pre-release leads to (1.1.0 for 1.1.0-rc.1): what a mod's "hmgapi"
      * range of final versions is checked against (Version.meetsHmgapi). Updates compare
@@ -261,8 +261,6 @@ public final class Engine {
         if ("report".equals(cmd)) return Report.run(this, args.length > 1 && "--usb".equals(args[1]));
         if ("usb-scan".equals(cmd)) return UsbUpdates.scan(this);
         if ("publish-state".equals(cmd)) return LiveState.publish(this);
-        if ("launcher-tiles".equals(cmd)) return LauncherTilesStore.get(this);
-        if ("launcher-tiles-set".equals(cmd)) return LauncherTilesStore.set(this, args.length > 1 ? args[1] : null);
         if ("apps".equals(cmd)) return ModApps.sync(this);
         if ("probe".equals(cmd)) {   // a mod's install-time probe again (its answer is kept until then)
             if (args.length < 2 || !args[1].matches("[a-z0-9][a-z0-9-]*")) { out.add("usage: probe <mod id>"); return 2; }

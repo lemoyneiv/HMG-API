@@ -125,8 +125,6 @@ check "app: sh refused" "13" "$(code app sh 'echo no')"
 check "app: remount refused" "13" "$(code app remount rw)"
 check "app: reboot allowed" "0" "$(code app reboot)"
 check "app: engine allowed" "0" "$(code app engine status)"
-check "app: engine launcher-tiles allowed" "0" "$(code app engine launcher-tiles)"
-check "app: engine launcher-tiles-set allowed" "0" "$(code app engine launcher-tiles-set '{}')"
 
 # --- anyone else
 check "other: ping" "ok" "$(run other ping)"

@@ -16,7 +16,7 @@ RUNTIME = ['core/runtime/*-test.sh']
 # the tests that compile hmgapi.engine (tools/engine-classes.sh): the rest of core/runtime's
 # Java (hook, vehicle) is only compiled by the build and the SDK, and its own tests
 ENGINE = ['core/runtime/engine-test.sh', 'core/runtime/signing-test.sh', 'core/runtime/system-test.sh', 'core/runtime/safety-test.sh',
-          'core/runtime/packages-test.sh', 'core/runtime/map-test.sh', 'core/runtime/local-map-test.sh', 'core/runtime/launcher-tiles-test.sh', 'core/runtime/usb-test.sh', 'core/runtime/hooks-test.sh',
+          'core/runtime/packages-test.sh', 'core/runtime/map-test.sh', 'core/runtime/local-map-test.sh', 'core/runtime/usb-test.sh', 'core/runtime/hooks-test.sh',
           'core/runtime/live-test.sh', 'core/runtime/native-test.sh', 'core/runtime/runtime-test.sh', 'core/runtime/net-test.sh',
           'core/runtime/overlap-test.sh', 'core/runtime/scriptcheck-test.sh', 'install/nemesis/mod-test.sh', 'install/nemesis/sync-test.sh',
           'tools/catalog-test.sh', 'tools/version-test.sh', 'tools/check-scripts.sh']
@@ -39,7 +39,7 @@ RULES = [
     # the engine also gives the version the installers and the SDK are named by (Engine.java)
     (['core/runtime/java/hmgapi/engine/*', 'core/runtime/test/hmgapi/engine/*'], ENGINE + INSTALL + SDK),
     # hooks and the vehicle service: their own tests, and the SDK (mods compile against them)
-    (['core/runtime/java/hmgapi/hook/*', 'core/runtime/test/hmgapi/hook/*'], ['core/runtime/keys-test.sh', 'core/runtime/mod-dex-test.sh', 'core/runtime/local-map-test.sh', 'core/runtime/launcher-tiles-test.sh', 'core/runtime/ble-test.sh'] + SDK),
+    (['core/runtime/java/hmgapi/hook/*', 'core/runtime/test/hmgapi/hook/*'], ['core/runtime/keys-test.sh', 'core/runtime/mod-dex-test.sh', 'core/runtime/local-map-test.sh', 'core/runtime/ble-test.sh'] + SDK),
     (['core/runtime/java/hmgapi/vehicle/*', 'core/runtime/test/hmgapi/vehicle/*'], ['core/runtime/commands-test.sh'] + SDK),
     (['core/runtime/java/hmgapi/ble/*', 'core/runtime/test/hmgapi/ble/*', 'core/runtime/test/ble_filter_test.c'], ['core/runtime/ble-test.sh'] + SDK),
     (['core/runtime/stubs/*'], SDK),
