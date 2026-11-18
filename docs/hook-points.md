@@ -17,42 +17,42 @@ Every point and map lives here, in HMG-API, including the ones only a mod in its
 uses (the wireless mod's, for one): a mod gets new points through an HMG-API release and its
 mod SDK ([mod-repos.md](mod-repos.md), section 4).
 
-351 hook points. **Cars** (`maps/`):
+355 hook points. **Cars** (`maps/`):
 
 | Car | Map | Points |
 |---|---|---|
-| Genesis G70 CAN 260903 | mapped on cars by HMG-API's own mapper | 351 of 351 |
-| Genesis G70 KOR 260902 | mapped on cars by HMG-API's own mapper | 341 of 351 |
-| Genesis G70 USA 260507 | mapped on cars by HMG-API's own mapper | 325 of 351 |
-| Hyundai Ioniq 6 CAN 260206 | checked on a car | 351 of 351 |
-| Hyundai Ioniq 6 SGP 260907 | mapped on cars by HMG-API's own mapper | 312 of 351 |
-| Hyundai Ioniq 6 USA 260507 | mapped from stock files | 351 of 351 |
-| Hyundai Ioniq 6 USA 260903 | checked on a car | 351 of 351 |
-| Hyundai Elantra N USA 260903 | mapped on cars by HMG-API's own mapper | 351 of 351 |
-| Hyundai Elantra USA 260507 | mapped on cars by HMG-API's own mapper | 351 of 351 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 CAN 260206 | mapped from stock files | 351 of 351 |
-| Hyundai Sonata, Sonata Hybrid, Santa Fe, Palisade KOR 260902 | mapped on cars by HMG-API's own mapper | 351 of 351 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260507 | mapped from stock files | 351 of 351 |
-| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 343 of 351 |
-| Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 351 of 351 |
-| Hyundai Ioniq 5 KOR 260902 | mapped from stock files | 351 of 351 |
-| Hyundai Ioniq 5 USA 260507 | mapped from stock files | 351 of 351 |
-| Hyundai Ioniq 5 USA 260903 | mapped from stock files | 351 of 351 |
-| Hyundai Kona USA 260903 | mapped on cars by HMG-API's own mapper | 351 of 351 |
-| Hyundai Creta IND 260430 | mapped on cars by HMG-API's own mapper | 338 of 351 |
-| Kia K3 KOR 260902 | mapped on cars by HMG-API's own mapper | 323 of 351 |
-| Kia EV6 CAN 260206 | mapped from stock files | 351 of 351 |
-| Kia EV6 KOR 260902 | mapped on cars by HMG-API's own mapper | 318 of 351 |
-| Kia EV6 USA 260507 | checked on a car | 351 of 351 |
-| Kia Carnival USA 260507 | mapped from stock files | 351 of 351 |
-| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21 CAN 260206 | mapped from stock files | 351 of 351 |
-| Kia K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray KOR 260902 | mapped from stock files | 351 of 351 |
-| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21 USA 260507 | mapped from stock files | 351 of 351 |
-| Kia Sportage (and Hybrid, Plug-in Hybrid), Forte, Carnival 2022, Niro Hybrid and Plug-in Hybrid, Soul, Seltos 2024 USA 260507 | mapped from stock files | 351 of 351 |
-| Kia Telluride USA 260507 | mapped from stock files | 351 of 351 |
-| Kia Niro EV CAN 260206 | mapped on cars by HMG-API's own mapper | 351 of 351 |
-| Kia Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024 CAN 260206 | mapped from stock files | 351 of 351 |
-| Kia Niro EV USA 260507 | mapped from stock files | 351 of 351 |
+| Genesis G70 CAN 260903 | mapped on cars by HMG-API's own mapper | 355 of 355 |
+| Genesis G70 KOR 260902 | mapped on cars by HMG-API's own mapper | 345 of 355 |
+| Genesis G70 USA 260507 | mapped on cars by HMG-API's own mapper | 329 of 355 |
+| Hyundai Ioniq 6 CAN 260206 | checked on a car | 355 of 355 |
+| Hyundai Ioniq 6 SGP 260907 | mapped on cars by HMG-API's own mapper | 316 of 355 |
+| Hyundai Ioniq 6 USA 260507 | mapped from stock files | 355 of 355 |
+| Hyundai Ioniq 6 USA 260903 | checked on a car | 355 of 355 |
+| Hyundai Elantra N USA 260903 | mapped on cars by HMG-API's own mapper | 355 of 355 |
+| Hyundai Elantra USA 260507 | mapped on cars by HMG-API's own mapper | 355 of 355 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 CAN 260206 | mapped from stock files | 355 of 355 |
+| Hyundai Sonata, Sonata Hybrid, Santa Fe, Palisade KOR 260902 | mapped on cars by HMG-API's own mapper | 355 of 355 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260507 | mapped from stock files | 355 of 355 |
+| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 347 of 355 |
+| Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 355 of 355 |
+| Hyundai Ioniq 5 KOR 260902 | mapped from stock files | 355 of 355 |
+| Hyundai Ioniq 5 USA 260507 | mapped from stock files | 355 of 355 |
+| Hyundai Ioniq 5 USA 260903 | mapped from stock files | 355 of 355 |
+| Hyundai Kona USA 260903 | mapped on cars by HMG-API's own mapper | 355 of 355 |
+| Hyundai Creta IND 260430 | mapped on cars by HMG-API's own mapper | 342 of 355 |
+| Kia K3 KOR 260902 | mapped on cars by HMG-API's own mapper | 327 of 355 |
+| Kia EV6 CAN 260206 | mapped from stock files | 355 of 355 |
+| Kia EV6 KOR 260902 | mapped on cars by HMG-API's own mapper | 322 of 355 |
+| Kia EV6 USA 260507 | checked on a car | 355 of 355 |
+| Kia Carnival USA 260507 | mapped from stock files | 355 of 355 |
+| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21 CAN 260206 | mapped from stock files | 355 of 355 |
+| Kia K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray KOR 260902 | mapped from stock files | 355 of 355 |
+| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21 USA 260507 | mapped from stock files | 355 of 355 |
+| Kia Sportage (and Hybrid, Plug-in Hybrid), Forte, Carnival 2022, Niro Hybrid and Plug-in Hybrid, Soul, Seltos 2024 USA 260507 | mapped from stock files | 355 of 355 |
+| Kia Telluride USA 260507 | mapped from stock files | 355 of 355 |
+| Kia Niro EV CAN 260206 | mapped on cars by HMG-API's own mapper | 355 of 355 |
+| Kia Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024 CAN 260206 | mapped from stock files | 355 of 355 |
+| Kia Niro EV USA 260507 | mapped from stock files | 355 of 355 |
 
 In the tables, **Cars** is "all" when every car above has the point, otherwise the cars without it.
 
@@ -393,9 +393,11 @@ App `com.hkmc.system.app.homesetting`.
 | Point | Kind | Looks for | About | Cars |
 |---|---|---|---|---|
 | `homesetting.edit_list` | class | a class in `com.hkmc.system.app.homesetting` (no fixed name) | Edit menu's list of entries (as the launcher's, so the tile can be moved and saved) | all |
+| `homesetting.edit_list.new` | ctor | `new (android.content.Context)` |  | all |
 | `homesetting.edit_list.load` | method | `load()` → boolean |  | all |
 | `homesetting.edit_list.items` | field | `static ?`: java.util.List |  | all |
 | `homesetting.edit_list.get_context` | method | `getContext()` → android.content.Context |  | all |
+| `homesetting.edit_list.get_count` | method | `getCount()` → int |  | all |
 | `homesetting.edit_entry` | class | a class in `com.hkmc.system.app.homesetting` (no fixed name) |  | all |
 | `homesetting.edit_entry.new` | ctor | `new (homesetting.edit_list, android.content.Context, String, String, int, int, int)` |  | all |
 | `homesetting.edit_entry.get_class_name` | method | `getClassName()` → String |  | all |
@@ -433,10 +435,12 @@ App `com.android.launcher3`.
 | Point | Kind | Looks for | About | Cars |
 |---|---|---|---|---|
 | `launcher.menu_list` | class | a class in `com.android.launcher3` (no fixed name) | the all-apps menu's list of built-in entries (the launcher drops saved entries not in it) | all |
+| `launcher.menu_list.new` | ctor | `new (android.content.Context)` | constructs a menu list so mods can inspect entries before the launcher's first load | all |
 | `launcher.menu_list.load` | method | `load()` → boolean | fills the list; HMG-API adds mod entries after it | all |
 | `launcher.menu_list.items` | field | `?`: java.util.List |  | all |
 | `launcher.menu_list.lock` | field | `mLock`: Object |  | all |
 | `launcher.menu_list.get_context` | method | `getContext()` → android.content.Context |  | all |
+| `launcher.menu_list.get_count` | method | `getCount()` → int |  | all |
 | `launcher.menu_entry` | class | a class in `com.android.launcher3` (no fixed name) | one menu entry: package, activity, enabled/disabled icon and title resource ids | all |
 | `launcher.menu_entry.new` | ctor | `new (launcher.menu_list, android.content.Context, String, String, int, int, int)` |  | all |
 

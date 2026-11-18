@@ -22,6 +22,12 @@
     "ret": "android.content.Context",
     "static": false
   },
+  "launcher.menu_list.get_count": {
+    "method": "getCount",
+    "params": [],
+    "ret": "int",
+    "static": false
+  },
   "launcher.menu_list.items": {
     "field": "by",
     "type": "java.util.List",
@@ -37,5 +43,10 @@
     "field": "mLock",
     "type": "java.lang.Object",
     "static": false
+  },
+  "launcher.menu_list.new": {
+    "ctor": [
+      "android.content.Context"
+    ]
   }
 }

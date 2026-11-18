@@ -137,9 +137,13 @@ final class HmgApi {
             // always, even with no entries: the launcher's sync also clears items of removed mods
             // each feature hooks one app's points: all of them mapped on this car, or the feature is off
             if ("com.android.launcher3".equals(app.packageName)) {
-                if (Points.need("launcher entries", "launcher")) launcher(app.classLoader);
+                if (Points.needAll("launcher entries", "launcher.menu_list", "launcher.menu_list.load",
+                        "launcher.menu_list.get_context", "launcher.menu_list.items", "launcher.menu_list.lock",
+                        "launcher.menu_entry", "launcher.menu_entry.new")) launcher(app.classLoader);
             } else if ("com.hkmc.system.app.homesetting".equals(app.packageName)) {
-                if (Points.need("menu editor entries", "homesetting")) editor(app.classLoader);
+                if (Points.needAll("menu editor entries", "homesetting.edit_list", "homesetting.edit_list.load",
+                        "homesetting.edit_list.get_context", "homesetting.edit_list.items", "homesetting.edit_entry",
+                        "homesetting.edit_entry.new", "homesetting.edit_entry.get_class_name")) editor(app.classLoader);
             } else if ("com.android.buttonsettings".equals(app.packageName)) {
                 if (Points.need("star key choices", "buttonsettings")) StarKey.settingsScreens(app.classLoader);
             } else if (Panel.PACKAGE.equals(app.packageName)) {
@@ -158,6 +162,7 @@ final class HmgApi {
                         .set(null, Mods.statusJson(Updates.state()));
             }
             if ("com.android.launcher3".equals(app.packageName) && app.context != null) {
+                LauncherReload.start(app.context);
                 StarKey.start(app.context);
                 Updates.apply(app.context);
             }

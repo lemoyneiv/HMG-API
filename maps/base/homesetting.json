@@ -28,6 +28,12 @@
     "ret": "android.content.Context",
     "static": false
   },
+  "homesetting.edit_list.get_count": {
+    "method": "getCount",
+    "params": [],
+    "ret": "int",
+    "static": false
+  },
   "homesetting.edit_list.items": {
     "field": "cs",
     "type": "java.util.List",
@@ -38,5 +44,10 @@
     "params": [],
     "ret": "boolean",
     "static": false
+  },
+  "homesetting.edit_list.new": {
+    "ctor": [
+      "android.content.Context"
+    ]
   }
 }
