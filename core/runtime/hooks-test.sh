@@ -66,4 +66,13 @@ rm -r $R/data/hmgapi/mods/*
 # the mod loader's own decisions (hook.Mods: boot and live loads), on a mods folder
 javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" core/runtime/test/hmgapi/engine/HookPlanTest.java
 mkdir -p $T/loader; java -cp "$CP" hmgapi.engine.HookPlanTest $T/loader || fail=1
+
+# hook priority ordering (Bridge.insertHook) and saved-menu coordination (hook.SavedMenuSync)
+mkdir -p $T/sms
+javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$T/sms" \
+    core/runtime/java/hmgapi/hook/MethodHook.java \
+    core/runtime/java/hmgapi/hook/Bridge.java \
+    core/runtime/java/hmgapi/hook/SavedMenuSync.java \
+    core/runtime/test/hmgapi/hook/SavedMenuSyncTest.java
+java -cp "$CP:$T/sms" hmgapi.hook.SavedMenuSyncTest "$T/sms" || fail=1
 exit $fail

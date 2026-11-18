@@ -86,15 +86,18 @@ public final class Bridge {
             hookMethodNative(member, member.getDeclaringClass(), slotOf(member), list);
             hooked.put(member, list);
         }
-        // after every hook of the same or lower priority (so replace hooks come last)
-        MethodHook[] old = list.hooks;
+        list.hooks = insertHook(list.hooks, hook);
+    }
+
+    /** Inserts hook after every existing hook of the same or lower priority. */
+    static MethodHook[] insertHook(MethodHook[] old, MethodHook hook) {
         MethodHook[] now = new MethodHook[old.length + 1];
         int at = old.length;
         while (at > 0 && old[at - 1].priority > hook.priority) at--;
         System.arraycopy(old, 0, now, 0, at);
         now[at] = hook;
         System.arraycopy(old, at, now, at + 1, old.length - at);
-        list.hooks = now;
+        return now;
     }
 
     private static int slotOf(Member member) {

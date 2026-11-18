@@ -63,6 +63,7 @@ final class Live {
         serial = now;
         Map<String, Object> mods = (Map<String, Object>) state.get("mods");
         if (mods == null) return;
+        Mods.syncLiveEnabled(mods);
         for (Mods.Loaded m : new java.util.ArrayList<Mods.Loaded>(Mods.withHooks)) {
             ModContext ctx = m.context;
             Map<String, Object> s = (Map<String, Object>) mods.get(ctx.id);
