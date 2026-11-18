@@ -47,6 +47,16 @@
       "about": "Edit menu's list of entries (as the launcher's, so the tile can be moved and saved)"
     },
     {
+      "id": "homesetting.edit_list.new",
+      "kind": "ctor",
+      "of": "homesetting.edit_list",
+      "find": {
+        "params": [
+          "android.content.Context"
+        ]
+      }
+    },
+    {
       "id": "homesetting.edit_list.load",
       "kind": "method",
       "of": "homesetting.edit_list",
@@ -73,6 +83,16 @@
         "name": "getContext",
         "params": [],
         "ret": "android.content.Context"
+      }
+    },
+    {
+      "id": "homesetting.edit_list.get_count",
+      "kind": "method",
+      "of": "homesetting.edit_list",
+      "find": {
+        "name": "getCount",
+        "params": [],
+        "ret": "int"
       }
     },
     {

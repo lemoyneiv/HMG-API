@@ -85,6 +85,10 @@ public final class PointsTest {
                 && log.get(log.size() - 1).contains("test.a.go is mapped on this car only"));
         check("need(app) for HMG-API's own feature: off", !Points.need("Feature Y", "test"));
         check("needAll on HMG-API's map's points only: on", Points.needAll("Feature Z", "test.a"));
+        m.missing.put("test.a.opt", "newer than this map");
+        check("an optional mod point missing from an older map turns need(app) off, but needAll on core's points stays on",
+                !Points.need("Feature Y", "test") && Points.needAll("Feature Z", "test.a"));
+        m.missing.remove("test.a.opt");
 
         m.testing = true;   // the owner's "Try unchecked maps"
         Points.call(null, "test.a.go", null);
