@@ -10,7 +10,11 @@ import java.lang.reflect.Member;
  * ModContext.hook, which orders "replace" hooks after every other one on a method.
  */
 public abstract class MethodHook {
-    /** order on one method: lower runs first; HMG-API core and observe/change 0, replace 1 */
+    static final int PRIORITY_DEFAULT = 0;
+    static final int PRIORITY_CORE_AFTER = 1;
+    static final int PRIORITY_REPLACE = 2;
+
+    /** order on one method: beforeHookedMethod runs low-to-high, afterHookedMethod high-to-low */
     int priority;
 
     protected void beforeHookedMethod(Param param) throws Throwable {}

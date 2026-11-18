@@ -189,8 +189,9 @@ final class HmgApi {
     static void launcher(ClassLoader cl) throws Exception {
         final ClassLoader loader = cl;
         final Constructor<?> newEntry = Points.ctor(cl, "launcher.menu_entry.new");
+        hookEntryResources();
 
-        Points.hook(cl, "launcher.menu_list.load", new MethodHook() {
+        MethodHook loadHook = new MethodHook() {
             @Override
             protected void afterHookedMethod(Param param) throws Throwable {
                 Context ctx = (Context) Points.call(loader, "launcher.menu_list.get_context", param.thisObject);
@@ -201,7 +202,7 @@ final class HmgApi {
                 int added = 0;
                 synchronized (Points.get(loader, "launcher.menu_list.lock", param.thisObject)) {
                     for (Mods.LauncherEntry m : Mods.launcherEntries()) {
-                        if (!installed(ctx, m)) continue;
+                        if (!activeEntry(ctx, m)) continue;
                         list.add(newEntry.newInstance(param.thisObject, ctx, m.packageName, m.className, m.icon,
                                 m.iconDisabled, m.titleId));
                         added++;
@@ -214,8 +215,9 @@ final class HmgApi {
                     syncSavedMenu(ctx);
                 }
             }
-        });
-        hookEntryResources();
+        };
+        loadHook.priority = MethodHook.PRIORITY_CORE_AFTER;
+        Points.hook(cl, "launcher.menu_list.load", loadHook);
         i("launcher: hooked menu list and entry resources");
     }
 
@@ -223,8 +225,9 @@ final class HmgApi {
         final ClassLoader loader = cl;
         final Constructor<?> newEntry = Points.ctor(cl, "homesetting.edit_entry.new");
         final Field cs = Points.field(cl, "homesetting.edit_list.items");
+        hookEntryResources();
 
-        Points.hook(cl, "homesetting.edit_list.load", new MethodHook() {
+        MethodHook loadHook = new MethodHook() {
             @Override
             protected void afterHookedMethod(Param param) throws Throwable {
                 Context ctx = (Context) Points.call(loader, "homesetting.edit_list.get_context", param.thisObject);
@@ -234,8 +237,14 @@ final class HmgApi {
                 if (list == null) return;
                 int added = 0;
                 synchronized (list) {
+                    for (java.util.Iterator<Object> it = list.iterator(); it.hasNext();) {
+                        Object o = it.next();
+                        Mods.LauncherEntry em = entryForClass(
+                                String.valueOf(Points.call(loader, "homesetting.edit_entry.get_class_name", o)));
+                        if (em != null && !activeEntry(ctx, em)) it.remove();
+                    }
                     for (Mods.LauncherEntry m : Mods.launcherEntries()) {
-                        if (!installed(ctx, m) || listed(loader, list, m)) continue;
+                        if (!activeEntry(ctx, m) || listed(loader, list, m)) continue;
                         list.add(newEntry.newInstance(param.thisObject, ctx, m.packageName, m.className, m.icon,
                                 m.iconDisabled, m.titleId));
                         added++;
@@ -244,8 +253,9 @@ final class HmgApi {
                 i("editor: menu list loaded (" + param.getResult() + "), added " + added + ", " + list.size()
                         + " entries");
             }
-        });
-        hookEntryResources();
+        };
+        loadHook.priority = MethodHook.PRIORITY_CORE_AFTER;
+        Points.hook(cl, "homesetting.edit_list.load", loadHook);
         i("editor: hooked menu list and entry resources");
     }
 
@@ -254,6 +264,10 @@ final class HmgApi {
             if (m.className.equals(Points.call(cl, "homesetting.edit_entry.get_class_name", o))) return true;
         }
         return false;
+    }
+
+    static boolean activeEntry(Context ctx, Mods.LauncherEntry m) {
+        return Mods.modEnabled(m.mod) && installed(ctx, m);
     }
 
     static boolean installed(Context ctx, Mods.LauncherEntry m) {
@@ -273,81 +287,44 @@ final class HmgApi {
         return null;
     }
 
-    /** Adds missing entries to each profile's saved menu and empties HMG-API items whose mod is gone. */
+    /** Seeds new entries into each profile's saved menu once and empties HMG-API items whose mod is gone or off. */
     static void syncSavedMenu(Context ctx) {
         ContentResolver cr = ctx.getContentResolver();
         Cursor cur = null;
         try {
             cur = cr.query(ALL_MENU, null, null, null, null);
             if (cur == null) return;
+            List<Mods.LauncherEntry> all = Mods.launcherEntries();
+            List<SavedMenuSync.Spec> specs = new java.util.ArrayList<SavedMenuSync.Spec>(all.size());
+            for (int i = 0; i < all.size(); i++) {
+                Mods.LauncherEntry m = all.get(i);
+                specs.add(new SavedMenuSync.Spec(m.packageName, m.className, ITEM_ID_BASE + i, activeEntry(ctx, m)));
+            }
+            java.io.File seededFile = new java.io.File(ctx.getFilesDir(), SavedMenuSync.SEEDED_FILE);
+            java.util.Map<String, Set<String>> seededByProfile = SavedMenuSync.readSeeded(seededFile);
+            boolean seededDirty = false;
             int userCol = cur.getColumnIndex("userName"), itemsCol = cur.getColumnIndex("menu_items");
             while (cur.moveToNext()) {
                 String user = cur.getString(userCol);
                 String json = cur.getString(itemsCol);
                 if (user == null || json == null) continue;
-                JSONObject root = new JSONObject(json);
-                JSONArray arr = root.getJSONArray("menuItems");
-                boolean changed = false;
-                Set<String> present = new HashSet<String>();
-                for (int k = 0; k < arr.length(); k++) {
-                    JSONObject it = arr.getJSONObject(k);
-                    int id = it.optInt("itemId", -1);
-                    String cls = it.optString("className");
-                    boolean ours = id >= ITEM_ID_BASE || id == ITEM_ID_LEGACY;
-                    Mods.LauncherEntry m = entryForClass(cls);
-                    if (ours && (m == null || !installed(ctx, m))) {
-                        arr.put(k, emptySlot());
-                        changed = true;
-                        i("saved menu (" + user + "): removed " + cls + " (its mod is gone), slot " + (k + 1));
-                    } else if (m != null) {
-                        present.add(cls);
-                        if (id != itemId(m)) {   // ours, from an earlier build: give it the current id
-                            it.put("itemId", itemId(m));
-                            changed = true;
-                        }
-                    }
-                }
-                for (Mods.LauncherEntry m : Mods.launcherEntries()) {
-                    if (present.contains(m.className) || !installed(ctx, m)) continue;
-                    int empty = -1;
-                    for (int k = 0; k < arr.length() && empty < 0; k++) {
-                        if ("Empty view".equals(arr.getJSONObject(k).optString("packageName"))) empty = k;
-                    }
-                    if (empty < 0) {
-                        i("saved menu (" + user + "): no empty slot for " + m.className);
-                        continue;
-                    }
-                    JSONObject it = new JSONObject();
-                    it.put("packageName", m.packageName);
-                    it.put("itemId", itemId(m));
-                    it.put("className", m.className);
-                    arr.put(empty, it);
-                    changed = true;
-                    i("saved menu (" + user + "): added " + m.className + " in slot " + (empty + 1));
-                }
-                if (changed) {
+                Set<String> seeded = seededByProfile.get(user);
+                if (seeded == null) seededByProfile.put(user, seeded = new java.util.LinkedHashSet<String>());
+                SavedMenuSync.ProfileResult r = SavedMenuSync.syncProfile(user, json, specs, seeded);
+                for (String line : r.logs) i(line);
+                if (r.seededChanged) seededDirty = true;
+                if (r.updatedMenuJson != null) {
                     ContentValues v = new ContentValues();
-                    v.put("menu_items", root.toString());
+                    v.put("menu_items", r.updatedMenuJson);
                     cr.update(ALL_MENU, v, "userName=?", new String[] { user });
                 }
             }
+            if (seededDirty) SavedMenuSync.writeSeeded(seededFile, seededByProfile);
         } catch (Throwable t) {
             e("saved menu", t);
         } finally {
             if (cur != null) cur.close();
         }
-    }
-
-    static int itemId(Mods.LauncherEntry m) {
-        return ITEM_ID_BASE + Mods.launcherEntries().indexOf(m);
-    }
-
-    static JSONObject emptySlot() throws Exception {
-        JSONObject it = new JSONObject();
-        it.put("packageName", "Empty view");
-        it.put("itemId", 39);
-        it.put("className", "Empty view");
-        return it;
     }
 
     static Mods.LauncherEntry entryForResource(int id) {
