@@ -1413,7 +1413,7 @@ static void svc_tick(void)
     int i;
     if (now == last) return;
     last = now;
-    if (!android_up && now - last_android_check >= 5) {
+    if (!android_up && now - last_android_check >= 1) {
         char v[16];
         char *a[] = { GETPROP, "sys.boot_completed", 0 };
         last_android_check = now;
@@ -2061,7 +2061,15 @@ static int boot_main(void)
     for (i = 3; i < 1024; i++) x_close(i);
     if (daemon_main() != 0) x_exit(0);
     f = x_open(BOOTMARK, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-    if (f < 0) x_exit(0);   /* another trigger ran boot.sh this boot */
+    if (f < 0) {   /* another trigger ran boot.sh this boot (or QuickBoot STR resume re-ran init hooks) */
+        if (exists(ROOTDIR "/wake.sh")) {
+            static char *wa[] = { SH, ROOTDIR "/wake.sh", 0 };
+            f = x_open(ROOTDIR "/wake.log", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+            if (f >= 0) { x_dup2(f, 1); x_dup2(f, 2); if (f > 2) x_close(f); }
+            x_execve(wa[0], wa, g_env);
+        }
+        x_exit(0);
+    }
     x_close(f);
     f = x_open(ROOTDIR "/boot.log", O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (f >= 0) { x_dup2(f, 1); x_dup2(f, 2); if (f > 2) x_close(f); }

@@ -152,7 +152,7 @@ if [ -z "$ROOT" ]; then
     done
     [ -s "$D/state/apps.installed" ] && : > "$D/state/apps.alloff"   # a reinstall turns them on again
 fi
-rm -f "$D/installed.txt" "$D/hook/enable" "$D/public/HmgApi.apk" "$D/HmgApi.apk" "$D/open.sh" "$D/hook-check.sh" "$D/boot.sh"
+rm -f "$D/installed.txt" "$D/hook/enable" "$D/public/HmgApi.apk" "$D/public/wake" "$D/HmgApi.apk" "$D/open.sh" "$D/hook-check.sh" "$D/boot.sh" "$D/wake.sh" "$D/wake.log"
 
 # 6. NEMESIS's package list: HMG-API and its mods off it too, the mods first (they depend on
 # HMG-API's package). HMGAPI_NEMESIS_SYNC=1: their scripts only unlist (refreshed first: an

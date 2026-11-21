@@ -180,7 +180,7 @@ rm -f "$D/hook/boot" "$D/hook/disable"
         echo "file $(sum "$ROOT$f") $f"
     done
 } > "$D/installed.txt"
-cp "$P/uninstall.sh" "$P/lib.sh" "$P/stock.txt" "$P/app-pending.sh" "$P/hook-check.sh" "$P/boot.sh" "$D/" && chmod 700 "$D/uninstall.sh" "$D/app-pending.sh" "$D/hook-check.sh" "$D/boot.sh"
+cp "$P/uninstall.sh" "$P/lib.sh" "$P/stock.txt" "$P/app-pending.sh" "$P/hook-check.sh" "$P/boot.sh" "$P/wake.sh" "$D/" && chmod 700 "$D/uninstall.sh" "$D/app-pending.sh" "$D/hook-check.sh" "$D/boot.sh" "$D/wake.sh"
 # open.sh (NEMESIS Manager's Launch, adb) installs the app from this copy if it's missing, then opens it
 cp "$P/app-open.sh" "$D/open.sh" && chmod 700 "$D/open.sh" || fail "keep open.sh"
 cp "$P/HmgApi.apk" "$D/HmgApi.apk" && chmod 644 "$D/HmgApi.apk" || fail "keep a copy of the app"
@@ -217,14 +217,21 @@ fi
 # Failed with Android up: kept waiting like that, so the next restart tries again (the boot
 # hook), and NEMESIS Manager's Launch (or open.sh over adb) tries at once.
 # pm installs from public/ (644): the package manager reads the file through a helper
-# that isn't root, and $P can be root-only (the USB installer stages it with umask 077:
-# INSTALL_FAILED_INVALID_URI, #187).
+# that isn't root, and $P can be root-only (the USB installer stages it with umask 077,
+# and NEMESIS stages inside 0700 /data/nemesis: INSTALL_FAILED_INVALID_URI, #187).
 # HMGAPI_TEST_ANDROID: off-car tests take this branch with stand-ins for pm, getprop and am.
 cp "$P/HmgApi.apk" "$D/public/HmgApi.apk" && chmod 644 "$D/public/HmgApi.apk" || fail "keep the app for later"
 if { [ -z "$ROOT" ] || [ "$HMGAPI_TEST_ANDROID" = 1 ]; } && [ "$(getprop sys.boot_completed)" = 1 ]; then
     setprop sys.boot_completed 0
     r=$(pm install -r "$D/public/HmgApi.apk" 2>&1)
     setprop sys.boot_completed 1
+    case "$r" in
+        *INCONSISTENT_CERTIFICATES*)
+            setprop sys.boot_completed 0
+            pm uninstall hmgapi.app >/dev/null 2>&1
+            r=$(pm install -r "$D/public/HmgApi.apk" 2>&1)
+            setprop sys.boot_completed 1 ;;
+    esac
     case "$r" in
         *Success*) rm -f "$D/public/HmgApi.apk"; log "installed the HMG-API app" ;;
         *)
