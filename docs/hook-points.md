@@ -17,48 +17,48 @@ Every point and map lives here, in HMG-API, including the ones only a mod in its
 uses (the wireless mod's, for one): a mod gets new points through an HMG-API release and its
 mod SDK ([mod-repos.md](mod-repos.md), section 4).
 
-406 hook points. **Cars** (`maps/`):
+407 hook points. **Cars** (`maps/`):
 
 | Car | Map | Points |
 |---|---|---|
-| Genesis G70 CAN 260903 | mapped on cars by HMG-API's own mapper | 396 of 406 |
-| Genesis G70 KOR 260902 | mapped on cars by HMG-API's own mapper | 356 of 406 |
-| Genesis G70 USA 260507 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Hyundai Ioniq 6 CAN 260206 | checked on a car | 406 of 406 |
-| Hyundai Ioniq 6 KOR 260902 | mapped on cars by HMG-API's own mapper | 348 of 406 |
-| Hyundai Ioniq 6 SGP 260907 | mapped on cars by HMG-API's own mapper | 327 of 406 |
-| Hyundai Ioniq 6 USA 260507 | mapped from stock files | 366 of 406 |
-| Hyundai Ioniq 6 USA 260903 | checked on a car | 406 of 406 |
-| Hyundai Elantra N USA 260903 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Hyundai Avante KOR 260902 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Hyundai Elantra USA 260507 | mapped on cars by HMG-API's own mapper | 406 of 406 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 CAN 260206 | mapped from stock files | 406 of 406 |
-| Hyundai Sonata, Sonata Hybrid, Santa Fe, Palisade KOR 260902 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260507 | mapped from stock files | 406 of 406 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260903 | mapped from stock files | 406 of 406 |
-| Hyundai Palisade USA 260507 | mapped from stock files | 366 of 406 |
-| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 406 of 406 |
-| Hyundai Ioniq 5 KOR 260902 | mapped from stock files | 406 of 406 |
-| Hyundai Ioniq 5 USA 260507 | mapped from stock files | 406 of 406 |
-| Hyundai Ioniq 5 USA 260903 | mapped from stock files | 406 of 406 |
-| Hyundai Kona USA 260903 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Hyundai Creta Electric IND 260430 | mapped on cars by HMG-API's own mapper | 367 of 406 |
-| Hyundai Creta IND 260430 | mapped on cars by HMG-API's own mapper | 353 of 406 |
-| Kia K3 KOR 260902 | mapped on cars by HMG-API's own mapper | 338 of 406 |
-| Kia EV6 CAN 260206 | mapped from stock files | 406 of 406 |
-| Kia EV6 IND 260430 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Kia EV6 KOR 260902 | mapped on cars by HMG-API's own mapper | 333 of 406 |
-| Kia EV6 USA 260507 | checked on a car | 406 of 406 |
-| Kia Carnival USA 260507 | mapped from stock files | 406 of 406 |
-| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21 CAN 260206 | mapped from stock files | 406 of 406 |
-| Kia K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray KOR 260902 | mapped from stock files | 406 of 406 |
-| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21 USA 260507 | mapped from stock files | 406 of 406 |
-| Kia Sportage (and Hybrid, Plug-in Hybrid), Forte, Carnival 2022, Niro Hybrid and Plug-in Hybrid, Soul, Seltos 2024 USA 260507 | mapped from stock files | 406 of 406 |
-| Kia Telluride USA 260507 | mapped from stock files | 406 of 406 |
-| Kia Niro EV CAN 260206 | mapped on cars by HMG-API's own mapper | 366 of 406 |
-| Kia Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024 CAN 260206 | mapped from stock files | 406 of 406 |
-| Kia Niro EV USA 260507 | mapped from stock files | 406 of 406 |
+| Genesis G70 CAN 260903 | mapped on cars by HMG-API's own mapper | 397 of 407 |
+| Genesis G70 KOR 260902 | mapped on cars by HMG-API's own mapper | 357 of 407 |
+| Genesis G70 USA 260507 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Hyundai Ioniq 6 CAN 260206 | checked on a car | 407 of 407 |
+| Hyundai Ioniq 6 KOR 260902 | mapped on cars by HMG-API's own mapper | 349 of 407 |
+| Hyundai Ioniq 6 SGP 260907 | mapped on cars by HMG-API's own mapper | 328 of 407 |
+| Hyundai Ioniq 6 USA 260507 | mapped from stock files | 367 of 407 |
+| Hyundai Ioniq 6 USA 260903 | checked on a car | 407 of 407 |
+| Hyundai Elantra N USA 260903 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Hyundai Avante KOR 260902 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Hyundai Elantra USA 260507 | mapped on cars by HMG-API's own mapper | 407 of 407 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 CAN 260206 | mapped from stock files | 407 of 407 |
+| Hyundai Sonata, Sonata Hybrid, Santa Fe, Palisade KOR 260902 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260507 | mapped from stock files | 407 of 407 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260903 | mapped from stock files | 407 of 407 |
+| Hyundai Palisade USA 260507 | mapped from stock files | 367 of 407 |
+| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 407 of 407 |
+| Hyundai Ioniq 5 KOR 260902 | mapped from stock files | 407 of 407 |
+| Hyundai Ioniq 5 USA 260507 | mapped from stock files | 407 of 407 |
+| Hyundai Ioniq 5 USA 260903 | mapped from stock files | 407 of 407 |
+| Hyundai Kona USA 260903 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Hyundai Creta Electric IND 260430 | mapped on cars by HMG-API's own mapper | 368 of 407 |
+| Hyundai Creta IND 260430 | mapped on cars by HMG-API's own mapper | 354 of 407 |
+| Kia K3 KOR 260902 | mapped on cars by HMG-API's own mapper | 339 of 407 |
+| Kia EV6 CAN 260206 | mapped from stock files | 407 of 407 |
+| Kia EV6 IND 260430 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Kia EV6 KOR 260902 | mapped on cars by HMG-API's own mapper | 334 of 407 |
+| Kia EV6 USA 260507 | checked on a car | 407 of 407 |
+| Kia Carnival USA 260507 | mapped from stock files | 407 of 407 |
+| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21 CAN 260206 | mapped from stock files | 407 of 407 |
+| Kia K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray KOR 260902 | mapped from stock files | 407 of 407 |
+| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21 USA 260507 | mapped from stock files | 407 of 407 |
+| Kia Sportage (and Hybrid, Plug-in Hybrid), Forte, Carnival 2022, Niro Hybrid and Plug-in Hybrid, Soul, Seltos 2024 USA 260507 | mapped from stock files | 407 of 407 |
+| Kia Telluride USA 260507 | mapped from stock files | 407 of 407 |
+| Kia Niro EV CAN 260206 | mapped on cars by HMG-API's own mapper | 367 of 407 |
+| Kia Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024 CAN 260206 | mapped from stock files | 407 of 407 |
+| Kia Niro EV USA 260507 | mapped from stock files | 407 of 407 |
 
 In the tables, **Cars** is "all" when every car above has the point, otherwise the cars without it.
 
@@ -494,6 +494,7 @@ App `com.android.launcher3`.
 | Point | Kind | Looks for | About | Cars |
 |---|---|---|---|---|
 | `launcher.menu_list` | class | a class in `com.android.launcher3` (no fixed name) | the all-apps menu's list of built-in entries (the launcher drops saved entries not in it) | all |
+| `launcher.menu_list.new` | ctor | `new (android.content.Context)` | constructs a menu list so mods can inspect entries before the launcher's first load | all |
 | `launcher.menu_list.load` | method | `load()` → boolean | fills the list; HMG-API adds mod entries after it | all |
 | `launcher.menu_list.items` | field | `?`: java.util.List |  | all |
 | `launcher.menu_list.lock` | field | `mLock`: Object |  | all |

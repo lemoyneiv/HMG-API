@@ -37,5 +37,10 @@
     "field": "mLock",
     "type": "java.lang.Object",
     "static": false
+  },
+  "launcher.menu_list.new": {
+    "ctor": [
+      "android.content.Context"
+    ]
   }
 }

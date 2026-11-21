@@ -169,6 +169,7 @@ final class HmgApi {
                         .set(null, Mods.statusJson(Updates.state()));
             }
             if ("com.android.launcher3".equals(app.packageName) && app.context != null) {
+                LauncherReload.start(app.context);
                 StarKey.start(app.context);
                 Updates.apply(app.context);
             }

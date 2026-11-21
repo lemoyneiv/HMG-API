@@ -75,4 +75,10 @@ javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$T/sms" \
     core/runtime/java/hmgapi/hook/SavedMenuSync.java \
     core/runtime/test/hmgapi/hook/SavedMenuSyncTest.java
 java -cp "$CP:$T/sms" hmgapi.hook.SavedMenuSyncTest "$T/sms" || fail=1
+
+# background Launcher recreation state diff, foreground deferral, and coalescing
+javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" \
+    core/runtime/java/hmgapi/hook/LauncherReloadState.java \
+    core/runtime/test/hmgapi/hook/LauncherReloadTest.java
+java -cp "$CP" hmgapi.hook.LauncherReloadTest || fail=1
 exit $fail

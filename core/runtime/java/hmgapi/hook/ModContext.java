@@ -197,6 +197,16 @@ public final class ModContext {
         Bridge.log(4, "[" + id + "] " + message);
     }
 
+    /**
+     * In com.android.launcher3: refreshes HomeSetting's all_menu observers and schedules a
+     * coalesced Activity.recreate() on the Launcher home activity once it is in the background
+     * (deferring until onStop if the owner is currently looking at the home screen). Returns
+     * false outside the launcher process or when no Launcher activity is alive yet.
+     */
+    public boolean reloadLauncher() {
+        return LauncherReload.request();
+    }
+
     private static final Map<String, String> MD5S = new HashMap<String, String>();
 
     /**
