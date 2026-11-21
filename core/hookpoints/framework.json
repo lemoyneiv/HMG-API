@@ -1810,6 +1810,39 @@
       }
     },
     {
+      "id": "framework.pgs_service.reverse_status",
+      "kind": "method",
+      "of": "framework.pgs_service",
+      "find": {
+        "name": "isReverseStatus",
+        "params": [],
+        "ret": "boolean"
+      },
+      "about": "true while reverse camera / reverse gear view is active"
+    },
+    {
+      "id": "framework.pgs_service.driving_rear_view_on",
+      "kind": "method",
+      "of": "framework.pgs_service",
+      "find": {
+        "name": "isDrivingRearViewOn",
+        "params": [],
+        "ret": "boolean"
+      },
+      "about": "true while Driving Rear View Monitor (DRVM) is on screen"
+    },
+    {
+      "id": "framework.pgs_service.front_view_on",
+      "kind": "method",
+      "of": "framework.pgs_service",
+      "find": {
+        "name": "isFrontViewOn",
+        "params": [],
+        "ret": "boolean"
+      },
+      "about": "true while front / surround camera view is on screen"
+    },
+    {
       "id": "framework.factory_service",
       "kind": "class",
       "find": {
@@ -2609,6 +2642,102 @@
         "params": [],
         "ret": "java.lang.String"
       }
+    },
+    {
+      "id": "framework.mode_manager",
+      "kind": "class",
+      "find": {
+        "name": "com.hkmc.mode.ModeManager"
+      },
+      "about": "the car's foreground mode API (media, radio, projection)"
+    },
+    {
+      "id": "framework.mode_manager.new",
+      "kind": "ctor",
+      "of": "framework.mode_manager",
+      "find": {
+        "params": [
+          "android.content.Context"
+        ]
+      }
+    },
+    {
+      "id": "framework.mode_manager.current_mode",
+      "kind": "method",
+      "of": "framework.mode_manager",
+      "find": {
+        "name": "getCurrentMode",
+        "params": [],
+        "ret": "int"
+      },
+      "about": "active foreground mode (54 Bluetooth Audio, 115 CarPlay, 116 Android Auto)"
+    },
+    {
+      "id": "framework.mode_service",
+      "kind": "class",
+      "find": {
+        "name": "com.hkmc.mode.IModeManager"
+      },
+      "about": "the car's mode service (com.hkmc.micom.mode)"
+    },
+    {
+      "id": "framework.mode_service_stub",
+      "kind": "class",
+      "find": {
+        "name": "com.hkmc.mode.IModeManager$Stub"
+      }
+    },
+    {
+      "id": "framework.mode_service_stub.as_interface",
+      "kind": "method",
+      "of": "framework.mode_service_stub",
+      "find": {
+        "name": "asInterface",
+        "params": [
+          "android.os.IBinder"
+        ],
+        "ret": "@framework.mode_service",
+        "static": true
+      }
+    },
+    {
+      "id": "framework.mode_service.current_mode",
+      "kind": "method",
+      "of": "framework.mode_service",
+      "find": {
+        "name": "getCurrentMode",
+        "params": [],
+        "ret": "int"
+      }
+    },
+    {
+      "id": "framework.micom_audio",
+      "kind": "class",
+      "find": {
+        "name": "com.hkmc.media.MicomAudioManager"
+      },
+      "about": "the car's MICOM audio routing API"
+    },
+    {
+      "id": "framework.micom_audio.new",
+      "kind": "ctor",
+      "of": "framework.micom_audio",
+      "find": {
+        "params": [
+          "android.content.Context"
+        ]
+      }
+    },
+    {
+      "id": "framework.micom_audio.mode",
+      "kind": "method",
+      "of": "framework.micom_audio",
+      "find": {
+        "name": "getAudioMode",
+        "params": [],
+        "ret": "int"
+      },
+      "about": "active MICOM audio mode (14 Bluetooth Audio, 22 CarPlay, 23 Android Auto)"
     }
   ]
 }

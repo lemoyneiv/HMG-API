@@ -663,6 +663,20 @@
     "ret": "boolean",
     "static": true
   },
+  "framework.micom_audio": {
+    "class": "com.hkmc.media.MicomAudioManager"
+  },
+  "framework.micom_audio.mode": {
+    "method": "getAudioMode",
+    "params": [],
+    "ret": "int",
+    "static": false
+  },
+  "framework.micom_audio.new": {
+    "ctor": [
+      "android.content.Context"
+    ]
+  },
   "framework.micomdata_callback_stub": {
     "class": "com.hkmc.micom.IMicomDataCallback$Stub"
   },
@@ -719,6 +733,20 @@
     "ret": "int",
     "static": false
   },
+  "framework.mode_manager": {
+    "class": "com.hkmc.mode.ModeManager"
+  },
+  "framework.mode_manager.current_mode": {
+    "method": "getCurrentMode",
+    "params": [],
+    "ret": "int",
+    "static": false
+  },
+  "framework.mode_manager.new": {
+    "ctor": [
+      "android.content.Context"
+    ]
+  },
   "framework.mode_manager_service": {
     "class": "com.hkmc.micom.ModeManagerService"
   },
@@ -753,6 +781,26 @@
     ],
     "ret": "int",
     "static": false
+  },
+  "framework.mode_service": {
+    "class": "com.hkmc.mode.IModeManager"
+  },
+  "framework.mode_service.current_mode": {
+    "method": "getCurrentMode",
+    "params": [],
+    "ret": "int",
+    "static": false
+  },
+  "framework.mode_service_stub": {
+    "class": "com.hkmc.mode.IModeManager$Stub"
+  },
+  "framework.mode_service_stub.as_interface": {
+    "method": "asInterface",
+    "params": [
+      "android.os.IBinder"
+    ],
+    "ret": "com.hkmc.mode.IModeManager",
+    "static": true
   },
   "framework.navigation_cluster": {
     "class": "com.hkmc.cluster.NavigationCluster"
@@ -919,6 +967,18 @@
   "framework.pgs_service": {
     "class": "com.hkmc.pgs.IPgsService"
   },
+  "framework.pgs_service.driving_rear_view_on": {
+    "method": "isDrivingRearViewOn",
+    "params": [],
+    "ret": "boolean",
+    "static": false
+  },
+  "framework.pgs_service.front_view_on": {
+    "method": "isFrontViewOn",
+    "params": [],
+    "ret": "boolean",
+    "static": false
+  },
   "framework.pgs_service.guide_lines": {
     "method": "getRvmGuideLineState",
     "params": [],
@@ -931,6 +991,12 @@
       "int"
     ],
     "ret": "void",
+    "static": false
+  },
+  "framework.pgs_service.reverse_status": {
+    "method": "isReverseStatus",
+    "params": [],
+    "ret": "boolean",
     "static": false
   },
   "framework.pgs_service_stub": {
