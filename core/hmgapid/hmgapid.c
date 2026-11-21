@@ -745,16 +745,22 @@ static int read_small(const char *p, char *buf, ul cap)
     return (int)t;
 }
 
-static int write_small(const char *p, const char *s)
+static int write_mode(const char *p, const char *s, int mode)
 {
     char t[256];
     sl f;
     path3(t, sizeof t, p, ".tmp", "");
-    f = x_open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    f = x_open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode);
     if (f < 0) return -1;
+    x_chmod(t, mode);
     if (wall((int)f, s, slen(s)) || x_fsync(f) < 0) { x_close(f); x_unlink(t); return -1; }
     x_close(f);
     return x_rename(t, p) < 0 ? -1 : 0;
+}
+
+static int write_small(const char *p, const char *s)
+{
+    return write_mode(p, s, 0600);
 }
 
 /* pid whose argv[0] is target and whose executable is src (by dev+inode), or 0 */
@@ -1041,22 +1047,6 @@ static void svc_log(const char *what, struct svc *v, sl n)
     logline(what, l.b, n, 0);
 }
 
-static void write_status(void)
-{
-    static char st[8192];
-    int i;
-    st[0] = 0;
-    for (i = 0; i < nsvc; i++) {
-        line_t l; l.n = 0; l.b[0] = 0;
-        if (svcs[i].gone) continue;
-        lput(&l, svcs[i].f[0]); lput(&l, " "); lput(&l, svcs[i].f[1]); lput(&l, " ");
-        lput(&l, s_names[svcs[i].state]); lput(&l, " "); lnum(&l, svcs[i].pid); lput(&l, " "); lnum(&l, svcs[i].fails);
-        apnd(st, sizeof st, l.b);
-    }
-    write_small(ROOTDIR "/state/services.status", st);
-    status_dirty = 0;
-}
-
 /* A folder with this mode and owner. Never through a symlink: a service's own folder
    belongs to its user, who could put a link where its dalvik-cache goes, and chmod/chown
    by path would then hand that user whatever the link points at. Anything there that
@@ -1076,6 +1066,30 @@ static void mkdir_owned(const char *p, int mode, int uid, int gid)
     if (uid >= 0) x_fchown(fd, uid, gid);
     x_close(fd);
 }
+
+static void write_status(void)
+{
+    static char st[8192], pub[4096];
+    int i;
+    st[0] = 0; pub[0] = 0;
+    for (i = 0; i < nsvc; i++) {
+        line_t l; l.n = 0; l.b[0] = 0;
+        if (svcs[i].gone) continue;
+        lput(&l, svcs[i].f[0]); lput(&l, " "); lput(&l, svcs[i].f[1]); lput(&l, " ");
+        lput(&l, s_names[svcs[i].state]); lput(&l, " "); lnum(&l, svcs[i].pid); lput(&l, " "); lnum(&l, svcs[i].fails);
+        apnd(st, sizeof st, l.b);
+        if (svcs[i].state == S_RUN && svcs[i].pid > 0 && !seq(svcs[i].f[0], "hmgapi")) {
+            l.n = 0; l.b[0] = 0;
+            lnum(&l, svcs[i].pid); lput(&l, " "); lput(&l, svcs[i].f[0]);
+            apnd(pub, sizeof pub, l.b);
+        }
+    }
+    write_small(ROOTDIR "/state/services.status", st);
+    mkdir_owned(ROOTDIR "/public", 0755, -1, -1);
+    write_mode(ROOTDIR "/public/services.txt", pub, 0644);
+    status_dirty = 0;
+}
+
 
 /* the user a service runs as: uid, gid, groups; -1 when its app isn't installed */
 static int svc_user(const char *user, u32 *gids, int *ng)
@@ -1932,6 +1946,7 @@ static int daemon_main(void)
     x_chmod(ROOTDIR "/hook", 0700);
     x_mkdir(ROOTDIR "/state", 0700);
     x_unlink(ROOTDIR "/state/services.status");   /* nothing runs yet */
+    x_unlink(ROOTDIR "/public/services.txt");
     s = x_socket(1, 1 | 02000000 /* SOCK_STREAM | SOCK_CLOEXEC */, 0);
     if (s < 0) return 1;
     r = x_bind(s, &a, alen);

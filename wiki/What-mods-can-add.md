@@ -48,6 +48,15 @@ car's own network (the mobile data modem, the internal link) is left out with a
 warning until you allow that mod (`overrides.allow_network`). The plan lists every
 rule.
 
+## Bluetooth Low Energy
+
+The head unit's Bluetooth chip supports Bluetooth Low Energy, though the stock
+software leaves Android's BLE interface off. Mods that ask for BLE can scan for and
+talk to nearby sensors and accessories (such as a 12V battery monitor, tyre sensors
+or an OBD adapter) while phone calls and Bluetooth music keep working as usual. The
+plan shows when a mod uses BLE, and turning the mod off disconnects its devices at
+once.
+
 ## Not while driving
 
 A mod can mark its own app as "not while driving": the car closes it with its own

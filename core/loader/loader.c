@@ -295,11 +295,20 @@ static long long n_mapCode(JNIEnv *env, jobject cls, long long hint, int len)
     return p == (void *)-1 ? 0 : (long long)(size_t)p;
 }
 
+int n_bleInit(void *env, void *cls, int tx_read_fd, int rx_write_fd);
+int n_bleState(void *env, void *cls, int listening, int handle_op);
+int n_bleStat(void *env, void *cls, int which);
+void n_bleShutdown(void *env, void *cls);
+
 static const JNINativeMethod natives[] = {
     { "log", "(ILjava/lang/String;)V", (void *)n_log },
     { "peekNative", "(JI)[B", (void *)n_peek },
     { "pokeNative", "(J[B)I", (void *)n_poke },
     { "mapCodeNative", "(JI)J", (void *)n_mapCode },
+    { "bleInitNative", "(II)I", (void *)n_bleInit },
+    { "bleStateNative", "(II)I", (void *)n_bleState },
+    { "bleStatNative", "(I)I", (void *)n_bleStat },
+    { "bleShutdownNative", "()V", (void *)n_bleShutdown },
     { "hookMethodNative", "(Ljava/lang/reflect/Member;Ljava/lang/Class;ILjava/lang/Object;)V", (void *)n_hookMethod },
 };
 

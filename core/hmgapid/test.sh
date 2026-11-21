@@ -222,9 +222,12 @@ check "started again" running "$(st loop)"
 check "a link in place of the service's dalvik-cache: what it points at is untouched" "-rw-r--r--" "$(ls -l "$T/private" | cut -c1-10)"
 check "... and the link is replaced by the folder" "drwx------" "$(ls -ld "$S/run/svc/loop/dalvik-cache" | cut -c1-10)"
 pid=$(run root services svc | awk '$2 == "loop" { print $4 }')
+has "public/services.txt lists running mod service pid" "$pid svc" "$(cat "$S/public/services.txt")"
+check "public/services.txt leaves out core hmgapi services" "" "$(grep ' hmgapi$' "$S/public/services.txt" || true)"
 grep -v '^svc loop ' "$S/state/services.txt" > "$S/state/s.tmp" && mv "$S/state/s.tmp" "$S/state/services.txt"
 waitfor '[ -z "$(st loop)" ]' || true
 check "mod turned off (line gone): service stopped and dropped" "" "$(st loop)"
+check "public/services.txt drops stopped service" "" "$(grep "^$pid svc$" "$S/public/services.txt" || true)"
 check "... its process ended" no "$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)"
 check "app may list services" 0 "$(code app services)"
 check "other may not" 13 "$(code other services)"

@@ -72,6 +72,7 @@ HINTS = [
     (r"media_codecs\.xml", "media_codecs.xml: \"codecs\" changes by codec name (merged with other mods); decisions made on the unit go in a \"probe\""),
     (r"enabled_input_methods", "a list setting: {\"type\": \"setting\", ..., \"add\": [entries]} (merged per entry with other mods)"),
     (r"persist\.wifi\.state|android\.hardware\.wifi", "Wi-Fi client: mod.json \"wifi\": {\"client\": true}"),
+    (r"bplus\.default\.so|BluetoothGatt|startLeScan|BluetoothLeScanner", "BLE scanner and GATT central: mod.json \"ble\": {\"central\": true} and hmgapi.client.Ble"),
     (r"/system/etc/permissions/com\.hkmc", "feature flags: mod.json \"feature_flags\": [...] (shared with other mods)"),
     (r"\bsettings\s+put\b", "Android settings: a \"setting\" change in patches.json (put back on removal)"),
     (r"com\.hkmc\.intent\.action\.TOAST", "fine as is; the client library also has HmgApi.toast(context, text)"),

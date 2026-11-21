@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Bluetooth Low Energy scanner and GATT central** (`"ble": {"central": true}` in
+  `mod.json`, `hmgapi.client.Ble` in `hmgapi-client.jar`): scan for BLE peripherals,
+  connect (up to four at once, shared across mods), negotiate ATT MTU and read, write or
+  subscribe to 16-bit and 128-bit GATT characteristics without root, alongside Classic
+  Bluetooth phone calls and audio. Shown in the plan, and disconnected at once when a
+  mod is turned off (#173). See "Bluetooth Low Energy" in `docs/mod-reference.md`.
+
 ## 1.1.0-rc.7 (2026-11-19)
 
 - **Comes with wireless CarPlay + Android Auto 2.2.0-rc.8** (it needs this RC's hook points): more

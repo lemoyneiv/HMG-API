@@ -28,6 +28,15 @@ public final class Bridge {
 
     static native long mapCodeNative(long hint, int len);
 
+    /** BLE HCI/ACL filter in com.android.bluetooth (core/loader/ble.c) */
+    static native int bleInitNative(int txReadFd, int rxWriteFd);
+
+    static native int bleStateNative(int listening, int handleOp);
+
+    static native int bleStatNative(int which);
+
+    static native void bleShutdownNative();
+
     private static native void hookMethodNative(Member method, Class<?> declaringClass, int slot, Object hookList);
 
     private static native Object invokeOriginalMethodNative(Member method, int hookInfo, Class<?>[] parameterTypes,
