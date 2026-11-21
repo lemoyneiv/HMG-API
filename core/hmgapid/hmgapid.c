@@ -1736,7 +1736,12 @@ static int op_wifi(int fd, int argc, char **argv)
         say(fd, "usage: wifi saved | seen | join <network> [key] | forget <network> | now [minutes] | back\n");
         return 2;
     }
-    if (x_stat64(ROOTDIR "/state/wifi.sh", st) != 0) { say(fd, "home Wi-Fi is off (HMG-API settings)\n"); return 1; }
+    if (x_stat64(ROOTDIR "/state/wifi.sh", st) != 0) {
+        say(fd, x_stat64(ROOTDIR "/settings/allow/home_wifi", st) == 0
+            ? "home Wi-Fi isn't applied yet (tap Apply changes, then restart)\n"
+            : "home Wi-Fi is off (HMG-API settings)\n");
+        return 1;
+    }
     if (argc == 4 && slen(argv[3]) > 100) { say(fd, "that key is too long\n"); return 2; }
     a[n++] = SH; a[n++] = ROOTDIR "/state/wifi.sh"; a[n++] = argv[1];
     if (argc >= 3) a[n++] = argv[2];

@@ -44,6 +44,8 @@ hasnt "no home Wi-Fi keeper while it's off" "hmgapi wifi " "$(cat "$D/state/serv
 # ---- the owner's switch on (the app's file), one mod allowed cellular
 mkdir -p "$D/settings/allow"; : > "$D/settings/allow/home_wifi"
 echo '{"overrides": {"allow_cellular": ["cell"]}}' > "$D/settings/hmgapi.json"
+eng plan
+has "the plan marks unapplied home Wi-Fi switch" "change   home Wi-Fi -> on [hmgapi]" "$out"
 eng publish-state
 check "home for the mod that asked, block for the one that didn't, allow for the override" "allow cell
 home dl
@@ -56,6 +58,7 @@ has "allowing cellular warns" "WARNING: cell: may use the car's cellular link (o
 has "the home Wi-Fi keeper runs" "hmgapi wifi root android yes script /data/hmgapi/state/wifi.sh" "$(cat "$D/state/services.txt")"
 check "its script written" yes "$([ -s "$D/state/wifi.sh" ] && echo yes || echo no)"
 eng plan
+hasnt "applied home Wi-Fi switch no longer marked pending" "change   home Wi-Fi ->" "$out"
 has "the plan: home Wi-Fi on" "home Wi-Fi  on" "$out"
 has "the plan: home Wi-Fi only for the mod that asked" "network  home Wi-Fi only (no cellular) [dl]" "$out"
 has "the plan: the allowed one" "may use cellular (overrides.allow_cellular, at your own risk) [cell]" "$out"
@@ -155,7 +158,10 @@ keeper once >/dev/null
 has "a reinstalled app's new uid" "--uid-owner 10091 -j REJECT" "$(cat "$F/fw/4/filter/HMGAPI_CELL")"
 hasnt "... the old one gone" "10071" "$(cat "$F/fw/4/filter/HMGAPI_CELL")"
 rm "$D/settings/allow/home_wifi"
+eng plan
+has "turning home Wi-Fi off marks pending change" "change   home Wi-Fi -> off [hmgapi]" "$out"
 eng publish-state
+check "home Wi-Fi off: keeper script removed" no "$([ -f "$D/state/wifi.sh" ] && echo yes || echo no)"
 keeper once >/dev/null
 check "home Wi-Fi off: no marks" no "$([ -f "$F/fw/4/mangle/HMGAPI_HOME" ] && echo yes || echo no)"
 hasnt "... no routing rule" "900:" "$(cat "$F/fw/ip4.rule")"

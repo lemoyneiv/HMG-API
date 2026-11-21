@@ -244,6 +244,7 @@ public class MainActivity extends Activity {
 
     void plan() {
         final AlertDialog wait = new AlertDialog.Builder(this).setMessage("Checking what would change…").show();
+        wait.setCanceledOnTouchOutside(false);
         planning = true;
         new Ui.Job<Hmgapid.Result>() {
             @Override
@@ -331,7 +332,7 @@ public class MainActivity extends Activity {
     static boolean changes(String out) {
         for (String l : out.split("\n")) {
             if (l.startsWith("change ") || l.startsWith("update ") || l.startsWith("restore ")) return true;
-            if (l.startsWith("setting ")) return true;
+            if (l.startsWith("setting ") || l.startsWith("bind ") || l.startsWith("unbind ")) return true;
         }
         return false;
     }
