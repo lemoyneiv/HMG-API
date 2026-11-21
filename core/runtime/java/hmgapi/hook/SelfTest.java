@@ -105,13 +105,23 @@ public final class SelfTest {
         final StringBuilder ran = new StringBuilder();
         ModContext.Guard rep = new ModContext.Guard(m1, "self.order", "replace", new MethodHook() {
             @Override protected void beforeHookedMethod(Param p) { ran.append("R"); p.setResult(7); }
+            @Override protected void afterHookedMethod(Param p) { ran.append("r"); }
         });
-        rep.priority = 1;
+        rep.priority = MethodHook.PRIORITY_REPLACE;
         Bridge.hookMethod(SelfTest.class.getDeclaredMethod("order"), rep);   // registered first
+        MethodHook coreAfter = new MethodHook() {
+            @Override protected void afterHookedMethod(Param p) { ran.append("C"); }
+        };
+        coreAfter.priority = MethodHook.PRIORITY_CORE_AFTER;
+        Bridge.hookMethod(SelfTest.class.getDeclaredMethod("order"), coreAfter);
         Bridge.hookMethod(SelfTest.class.getDeclaredMethod("order"), new ModContext.Guard(m2, "self.order", "observe",
-                new MethodHook() { @Override protected void beforeHookedMethod(Param p) { ran.append("O"); } }));
+                new MethodHook() {
+                    @Override protected void beforeHookedMethod(Param p) { ran.append("O"); }
+                    @Override protected void afterHookedMethod(Param p) { ran.append("o"); }
+                }));
         int got = order();
-        check("replace hook runs after an observe hook registered later", "OR".equals(ran.toString()) && got == 7, ran + " " + got);
+        check("replace runs last before, core after-hook runs before observe after-hook",
+                "ORrCo".equals(ran.toString()) && got == 7, ran + " " + got);
 
         Bridge.hookMethod(SelfTest.class.getDeclaredMethod("plain", int.class), new ModContext.Guard(m1, "self.plain", "observe",
                 new MethodHook() { @Override protected void afterHookedMethod(Param p) { p.setResult(-1); } }));

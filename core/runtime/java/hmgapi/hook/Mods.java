@@ -219,7 +219,9 @@ final class Mods {
     static final List<Info> infos = new ArrayList<Info>();
     static final List<StarAction> starActions = new ArrayList<StarAction>();
     static JSONObject hmgapiSettings = new JSONObject();
-    static final List<LauncherEntry> launcher = new ArrayList<LauncherEntry>();
+    static final List<LauncherEntry> launcher = new java.util.concurrent.CopyOnWriteArrayList<LauncherEntry>();
+    static final java.util.Set<String> launcherMods = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    static volatile Map<String, Boolean> liveEnabled;
     static final List<Loaded> withHooks = new ArrayList<Loaded>();
     static hmgapi.engine.HookPlan plan;
     static final java.util.Set<String> installedIds = new java.util.LinkedHashSet<String>();
@@ -313,6 +315,7 @@ final class Mods {
             if (mode != null) ctx.declared.put(e.getKey(), mode);
         }
 
+        launcherMods.add(id);
         JSONObject provides = mod.optJSONObject("provides");
         JSONArray entries = provides == null ? null : provides.optJSONArray("launcher");
         for (int i = 0; entries != null && i < entries.length(); i++) {
@@ -484,6 +487,49 @@ final class Mods {
 
     static List<LauncherEntry> launcherEntries() {
         return Collections.unmodifiableList(launcher);
+    }
+
+    static boolean modEnabled(String id) {
+        if ("hmgapi".equals(id)) return true;
+        Map<String, Boolean> m = liveEnabled;
+        return m == null || Boolean.TRUE.equals(m.get(id));
+    }
+
+    @SuppressWarnings("unchecked")
+    static void syncLiveEnabled(Map<String, Object> mods) {
+        if (mods == null) return;
+        Map<String, Boolean> next = new java.util.HashMap<String, Boolean>();
+        for (Map.Entry<String, Object> e : mods.entrySet()) {
+            String id = e.getKey();
+            Object v = e.getValue();
+            Map<String, Object> ms = v instanceof Map ? (Map<String, Object>) v : null;
+            boolean on = ms != null && Boolean.TRUE.equals(ms.get("enabled"));
+            next.put(id, Boolean.valueOf(on));
+            if (on && Boolean.TRUE.equals(ms.get("live")) && !"hmgapi".equals(id)) {
+                synchronized (launcherMods) {
+                    if (launcherMods.add(id)) {
+                        try {
+                            File dir = new File(MODS, id);
+                            File mj = new File(dir, "mod.json");
+                            if (mj.isFile()) {
+                                JSONObject mod = new JSONObject(read(mj));
+                                JSONObject provides = mod.optJSONObject("provides");
+                                JSONArray entries = provides == null ? null : provides.optJSONArray("launcher");
+                                for (int i = 0; entries != null && i < entries.length(); i++) {
+                                    JSONObject le = entries.getJSONObject(i);
+                                    String pkg = le.getString("package"), cls = le.getString("class");
+                                    if (cls.startsWith(".")) cls = pkg + cls;
+                                    launcher.add(new LauncherEntry(id, pkg, cls, le.optString("title", null), launcher.size()));
+                                }
+                            }
+                        } catch (Exception ex) {
+                            HmgApi.e("mods: live launcher entries of " + id, ex);
+                        }
+                    }
+                }
+            }
+        }
+        liveEnabled = next;
     }
 
     static String read(File f) throws IOException {

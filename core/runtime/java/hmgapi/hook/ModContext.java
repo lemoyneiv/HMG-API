@@ -44,7 +44,7 @@ public final class ModContext {
         String mode = declared.get(point);
         if (mode == null) throw new IllegalStateException(id + ": hook point " + point + " isn't declared in mod.json");
         Guard g = new Guard(this, point, mode, hook);
-        g.priority = "replace".equals(mode) ? 1 : 0;
+        g.priority = "replace".equals(mode) ? MethodHook.PRIORITY_REPLACE : MethodHook.PRIORITY_DEFAULT;
         return Points.hookAs(cl, point, g, mode);
     }
 
