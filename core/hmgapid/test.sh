@@ -181,6 +181,9 @@ has "wpa: nobody listening" "wpa_supplicant isn't answering" "$(run root wpa "$T
 # wifi: the app's home Wi-Fi verbs, through the keeper's script; the key only in its environment
 mv "$S/state/wifi.sh" "$S/state/wifi.sh.keep"
 check "wifi: off without its keeper" "home Wi-Fi is off (HMG-API settings)" "$(run root wifi saved)"
+run root allow home_wifi on >/dev/null
+check "wifi: switch on without its keeper says apply first" "home Wi-Fi isn't applied yet (tap Apply changes, then restart)" "$(run root wifi saved)"
+run root allow home_wifi off >/dev/null
 mkdir -p "$T/app/root/state"
 for d in "$S" "$T/app/root"; do printf 'echo "verb=$1 net=$2 key=$HMGAPI_WIFI_PSK args=$#"\n' > "$d/state/wifi.sh"; done
 check "wifi: join, the key in the environment" "verb=join net=Home key=sekret-key args=2" "$(run root wifi join Home sekret-key)"

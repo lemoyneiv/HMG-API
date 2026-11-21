@@ -110,10 +110,14 @@ final class HomeWifi {
         return net.length() > 0 || new File(e.stateDir, "mods-net.applied").isFile();
     }
 
-    /** the home Wi-Fi keeper's services.txt line, or null when it's off (its script written) */
+    /** the home Wi-Fi keeper's services.txt line, or null when it's off (its script written or removed) */
     static String service(Engine e) throws Exception {
         File script = new File(e.stateDir, "wifi.sh");
-        if (!on(e)) return null;
+        if (!on(e)) {
+            script.delete();
+            new File(e.data, "public/wifi.json").delete();
+            return null;
+        }
         if (!(script.isFile() && Engine.read(script).equals(SCRIPT))) {
             File tmp = new File(e.stateDir, ".wifi.sh.tmp");
             Engine.write(tmp, SCRIPT);
@@ -126,6 +130,9 @@ final class HomeWifi {
     static List<String> describe(Engine e, Map<String, Map<String, Object>> json, Set<String> on) {
         List<String> out = new ArrayList<String>();
         boolean home = on(e);
+        if (home != new File(e.stateDir, "wifi.sh").isFile()) {
+            out.add("change   home Wi-Fi -> " + (home ? "on" : "off") + " [hmgapi]");
+        }
         out.add("home Wi-Fi  " + (home ? "on: while the car is off, the hotspot off and the car's Wi-Fi client on the saved networks" : "off"));
         for (Map.Entry<String, String> m : modes(e, json, on).entrySet()) {
             String mode = m.getValue();

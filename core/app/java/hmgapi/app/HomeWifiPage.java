@@ -11,6 +11,7 @@ import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Switch;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -34,6 +35,7 @@ final class HomeWifiPage {
     final MainActivity a;
     final LinearLayout page;
     LinearLayout saved, found, cellular;
+    TextView nowView;
 
     HomeWifiPage(MainActivity a, LinearLayout page) {
         this.a = a;
@@ -50,11 +52,13 @@ final class HomeWifiPage {
         Ui.allowSwitch(a, sw, "home_wifi", false, new Runnable() {
             @Override
             public void run() {
-                a.needRestart();   // the car's Wi-Fi client feature: one file, read at boot
-                a.plan();
+                a.plan();   // apply() marks needRestart() once applied; calling needRestart() before plan() ran two engine plans at once
+                loadSaved();
+                scan();
             }
         });
-        Ui.text(page, "Now: " + now(), 16, false, Ui.TEXT);
+        nowView = Ui.text(page, "Now: " + now(), 16, false, Ui.TEXT);
+        startNowPoll();
         final SharedPreferences prefs = a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE);
         LinearLayout timer = Ui.row(a);
         page.addView(timer);
@@ -138,6 +142,18 @@ final class HomeWifiPage {
         loadCellular();
     }
 
+    void startNowPoll() {
+        final Runnable tick = new Runnable() {
+            @Override
+            public void run() {
+                if (a.isFinishing() || nowView == null || page.getWindowToken() == null) return;
+                nowView.setText("Now: " + now());
+                page.postDelayed(this, 3000);
+            }
+        };
+        page.postDelayed(tick, 3000);
+    }
+
     void add() {
         final EditText name = new EditText(a);
         name.setHint("Network name");
@@ -181,6 +197,7 @@ final class HomeWifiPage {
 
             @Override
             void done(Hmgapid.Result r, Exception e) {
+                if (nowView != null) nowView.setText("Now: " + now());
                 a.message("Home Wi-Fi", e != null ? "HMG-API isn't answering." : r.output.trim());
             }
         }.start(a);
@@ -197,7 +214,17 @@ final class HomeWifiPage {
             void done(Hmgapid.Result r, Exception e) {
                 saved.removeAllViews();
                 if (e != null || r.code != 0) {
-                    Ui.text(saved, e != null ? "HMG-API isn't answering." : r.output.trim(), 16, false, Ui.GREY);
+                    String msg = e != null ? "HMG-API isn't answering." : r.output.trim();
+                    boolean unapplied = msg.contains("isn't applied yet");
+                    Ui.text(saved, msg, 16, unapplied, unapplied ? Ui.WARN : Ui.GREY);
+                    if (unapplied) {
+                        Ui.button(saved, "Apply changes", true, new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                a.plan();
+                            }
+                        });
+                    }
                     return;
                 }
                 boolean any = false;
