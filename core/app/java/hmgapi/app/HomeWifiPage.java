@@ -10,14 +10,19 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.Switch;
+import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Settings > Home Wi-Fi: the owner's switch, the saved networks (Android's own Wi-Fi config), the
@@ -28,7 +33,7 @@ import java.util.Map;
 final class HomeWifiPage {
     final MainActivity a;
     final LinearLayout page;
-    LinearLayout saved, found;
+    LinearLayout saved, found, cellular;
 
     HomeWifiPage(MainActivity a, LinearLayout page) {
         this.a = a;
@@ -124,9 +129,13 @@ final class HomeWifiPage {
         Ui.line(page);
         Ui.text(page, "Mobile data", 21, true, Ui.TEXT);
         Ui.text(page, "Mods never use the car's mobile data, DNS lookups included: only home Wi-Fi, for the mods that ask. "
-                + "To let one mod use it anyway, at your own risk, list it in hmgapi.json overrides.allow_cellular.", 16, false, Ui.GREY);
+                + "You can let a mod use mobile data below, at your own risk (kept in hmgapi.json overrides.allow_cellular); "
+                + "it takes effect within a few seconds.", 16, false, Ui.GREY);
+        cellular = Ui.column(a);
+        page.addView(cellular);
         loadSaved();
         scan();
+        loadCellular();
     }
 
     void add() {
@@ -324,6 +333,149 @@ final class HomeWifiPage {
             @Override
             void done(Hmgapid.Result r, Exception e) {
                 loadSaved();
+            }
+        }.start(a);
+    }
+
+    /** Per-mod switches for hmgapi.json overrides.allow_cellular (live via Engine publish-state). */
+    void loadCellular() {
+        new Ui.Job<List<String[]>>() {
+            @Override
+            List<String[]> work() throws Exception {
+                Hmgapid.Result mr = Hmgapid.call("mods");
+                if (mr.code != 0) throw new IllegalStateException(mr.output.trim());
+                Hmgapid.Result sr = Hmgapid.call("setting-get", "hmgapi");
+                String raw = sr.code == 0 ? sr.output.trim() : "";
+                JSONObject root = raw.isEmpty() ? new JSONObject() : new JSONObject(raw);
+                JSONObject ov = root.optJSONObject("overrides");
+                JSONArray arr = ov == null ? null : ov.optJSONArray("allow_cellular");
+                Set<String> allowed = new LinkedHashSet<String>();
+                for (int i = 0; arr != null && i < arr.length(); i++) {
+                    String s = arr.optString(i, "").trim();
+                    if (!s.isEmpty()) allowed.add(s);
+                }
+                List<String[]> rows = new ArrayList<String[]>();
+                Set<String> seen = new LinkedHashSet<String>();
+                for (String line : mr.output.split("\n")) {
+                    String[] w = line.split("\t");
+                    if (w.length < 2) continue;
+                    String id = w[0];
+                    boolean enabled = "enabled".equals(w[1].trim());
+                    String name = id;
+                    try {
+                        Hmgapid.Result jf = Hmgapid.call("mod-file", id, "mod.json");
+                        if (jf.code == 0) name = new JSONObject(jf.output).optString("name", id);
+                    } catch (Exception ignored) {
+                    }
+                    seen.add(id);
+                    rows.add(new String[] { id, name, enabled ? name : name + " (off)", allowed.contains(id) ? "1" : "0" });
+                }
+                for (String id : allowed) {
+                    if (!seen.contains(id)) rows.add(new String[] { id, id, id + " (not installed)", "1" });
+                }
+                return rows;
+            }
+
+            @Override
+            void done(List<String[]> rows, Exception e) {
+                cellular.removeAllViews();
+                if (e != null) {
+                    Ui.text(cellular, "HMG-API isn't answering.", 16, false, Ui.GREY);
+                    return;
+                }
+                if (rows.isEmpty()) {
+                    Ui.text(cellular, "No mods installed.", 16, false, Ui.GREY);
+                    return;
+                }
+                for (String[] row : rows) {
+                    Switch sw = Ui.switchRow(cellular, row[2]);
+                    sw.setChecked("1".equals(row[3]));
+                    bindCellularSwitch(sw, row[0], row[1]);
+                }
+            }
+        }.start(a);
+    }
+
+    void bindCellularSwitch(final Switch sw, final String id, final String name) {
+        sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (!checked) {
+                    setCellular(sw, id, name, false);
+                    return;
+                }
+                new AlertDialog.Builder(a)
+                        .setTitle("Allow mobile data for " + name + "?")
+                        .setMessage("Its apps and services will be able to send traffic and DNS lookups over the car's "
+                                + "cellular link, at your own risk.")
+                        .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                setCheckedQuietly(sw, id, name, false);
+                            }
+                        })
+                        .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            @Override
+                            public void onCancel(DialogInterface d) {
+                                setCheckedQuietly(sw, id, name, false);
+                            }
+                        })
+                        .setPositiveButton("Allow", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                setCellular(sw, id, name, true);
+                            }
+                        }).show();
+            }
+        });
+    }
+
+    void setCheckedQuietly(Switch sw, String id, String name, boolean checked) {
+        sw.setOnCheckedChangeListener(null);
+        sw.setChecked(checked);
+        bindCellularSwitch(sw, id, name);
+    }
+
+    void setCellular(final Switch sw, final String id, final String name, final boolean allow) {
+        sw.setEnabled(false);
+        new Ui.Job<Hmgapid.Result>() {
+            @Override
+            Hmgapid.Result work() throws Exception {
+                Hmgapid.Result cur = Hmgapid.call("setting-get", "hmgapi");
+                if (cur.code != 0) return cur;
+                String raw = cur.output.trim();
+                JSONObject root = raw.isEmpty() ? new JSONObject() : new JSONObject(raw);
+                JSONObject ov = root.optJSONObject("overrides");
+                if (ov == null) ov = new JSONObject();
+                JSONArray prev = ov.optJSONArray("allow_cellular");
+                Set<String> ids = new LinkedHashSet<String>();
+                for (int i = 0; prev != null && i < prev.length(); i++) {
+                    String s = prev.optString(i, "").trim();
+                    if (!s.isEmpty()) ids.add(s);
+                }
+                if (allow) ids.add(id);
+                else ids.remove(id);
+                if (ids.isEmpty()) {
+                    ov.remove("allow_cellular");
+                } else {
+                    JSONArray next = new JSONArray();
+                    for (String s : ids) next.put(s);
+                    ov.put("allow_cellular", next);
+                }
+                if (ov.length() == 0) root.remove("overrides");
+                else root.put("overrides", ov);
+                return Hmgapid.call("setting-set", "hmgapi", root.toString());
+            }
+
+            @Override
+            void done(Hmgapid.Result r, Exception e) {
+                sw.setEnabled(true);
+                if (e != null || r.code != 0) {
+                    setCheckedQuietly(sw, id, name, !allow);
+                    Toast.makeText(a, "Couldn't save it", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                a.refreshStatus();
             }
         }.start(a);
     }

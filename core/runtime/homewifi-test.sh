@@ -160,8 +160,23 @@ keeper once >/dev/null
 check "home Wi-Fi off: no marks" no "$([ -f "$F/fw/4/mangle/HMGAPI_HOME" ] && echo yes || echo no)"
 hasnt "... no routing rule" "900:" "$(cat "$F/fw/ip4.rule")"
 check "... still off cellular" 4 "$(grep -c REJECT "$F/fw/4/filter/HMGAPI_CELL")"
+echo '{"overrides": {"allow_cellular": ["cell", "dl"]}}' > "$D/settings/hmgapi.json"
+eng publish-state
+: > "$F/fw/ndc.log"
+keeper once >/dev/null
+hasnt "allowing cellular live: its app uid dropped from HMGAPI_CELL" "10091" "$(cat "$F/fw/4/filter/HMGAPI_CELL")"
+has "... the other mod's app uid stays blocked" "--uid-owner 10072 -j REJECT" "$(cat "$F/fw/4/filter/HMGAPI_CELL")"
+check "... its wlan0 DNS range cleared in netd, only the blocked mod's put back" "resolver clearifaceforuidrange wlan0 10091 10091
+resolver clearifaceforuidrange wlan0 10072 10072
+resolver setifaceforuidrange wlan0 10072 10072" "$(cat "$F/fw/ndc.log")"
+echo '{"overrides": {"allow_cellular": ["cell"]}}' > "$D/settings/hmgapi.json"
+eng publish-state
+keeper once >/dev/null
+: > "$F/fw/ndc.log"
 keeper down >/dev/null
 hasnt "down: the cellular chain gone" "HMGAPI_CELL" "$(ipt -S OUTPUT)"
+check "down: netd's wlan0 DNS ranges cleared too" "resolver clearifaceforuidrange wlan0 10091 10091
+resolver clearifaceforuidrange wlan0 10072 10072" "$(cat "$F/fw/ndc.log")"
 : > "$D/settings/allow/home_wifi"
 eng publish-state
 
