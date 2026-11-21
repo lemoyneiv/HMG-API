@@ -16,6 +16,13 @@
   process can ask for the same refresh with `ModContext.reloadLauncher()`, and
   `launcher.menu_list.new` lets a live-loaded mod inspect the built-in menu list before
   the next load (#304).
+- **Per-mod mobile data override switches** (Settings > Home Wi-Fi > Mobile data): lets the owner
+  allow or revoke `overrides.allow_cellular` for an installed mod on screen (with a confirmation
+  warning before enabling), keeping any other `hmgapi.json` overrides intact. Switching takes effect
+  live without a restart: the network keeper clears `netd`'s `wlan0` UID DNS bindings in `mods_down`
+  when a mod leaves the cellular block, and `hmgapid` restarts running mod services when
+  `state/service-gids.txt` changes their network group (`2950` / `2951` / own group) and
+  `ANDROID_DNS_MODE`.
 
 ## 1.1.0-rc.7 (2026-11-19)
 

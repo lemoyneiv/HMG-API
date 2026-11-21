@@ -345,8 +345,8 @@ uid) and its services (hmgapid runs them with HMG-API's group 2950 or 2951 as th
 effective group) are refused there by the network keeper, and their lookups can't reach
 the car's DNS servers: an app's go through `wlan0` in netd (no servers there unless home Wi-Fi is up), a service's run in its own
 process (`ANDROID_DNS_MODE=local`). The owner can let one mod use mobile data anyway, at
-their own risk: `"overrides": {"allow_cellular": ["<mod>"]}` in `hmgapi.json` (the plan
-warns).
+their own risk, in **Settings > Home Wi-Fi > Mobile data** (`"overrides": {"allow_cellular": ["<mod>"]}`
+in `hmgapi.json`, applied live; the plan warns).
 
 For internet, a mod asks for **home Wi-Fi**:
 

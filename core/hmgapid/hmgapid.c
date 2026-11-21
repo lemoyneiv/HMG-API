@@ -979,15 +979,15 @@ static const char *const s_names[] = { "waiting", "running", "exited", "failed",
 struct svc {
     char line[SVC_LINE], buf[SVC_LINE];
     char *f[SVC_FIELDS + 1];
-    int nf, state, fails, gone, stopping;
+    int nf, state, fails, gone, stopping, uid, egid;
     sl pid;
     long next, started, kill_at;
 };
 static struct svc svcs[MAX_SVC];
 static int nsvc, android_up, status_dirty;
 static long last_android_check;
-static char svc_text[16384], apps_synced[8192];
-static int apps_sync_pending = 1;
+static char svc_text[16384], apps_synced[8192], gids_synced[4096];
+static int apps_sync_pending = 1, gids_synced_init;
 
 static int svc_name_ok(const char *s)
 {
@@ -1233,6 +1233,8 @@ static void svc_start(struct svc *v, long now)
     }
     if (lf >= 0) x_close(lf);
     v->pid = pid;
+    v->uid = uid;
+    v->egid = egid;
     v->state = S_RUN;
     v->started = now;
     v->next = 0;
@@ -1422,6 +1424,26 @@ static void svc_tick(void)
     }
     svc_reload(now);
     svc_ctl(now);
+    {   /* a mod's cellular/home-Wi-Fi group changed (allow_cellular or home_wifi): restart running services into it */
+        static char gids[4096];
+        if (read_small(ROOTDIR "/state/service-gids.txt", gids, sizeof gids) < 0) gids[0] = 0;
+        if (!gids_synced_init || !seq(gids, gids_synced)) {
+            mcpy(gids_synced, gids, slen(gids) + 1);
+            gids_synced_init = 1;
+            for (i = 0; i < nsvc; i++) {
+                struct svc *v = &svcs[i];
+                if (v->gone || v->stopping || v->state != S_RUN || v->pid <= 0 || seq(v->f[0], "hmgapi")) continue;
+                if (svc_gid(v->f[0], v->uid) != v->egid) {
+                    v->fails = 0;
+                    v->state = S_WAIT;
+                    v->next = now;
+                    svc_stop(v, now);
+                    svc_log("network group changed, restarting", v, -1);
+                    status_dirty = 1;
+                }
+            }
+        }
+    }
     /* the mods' apps, when the list changes (or first after Android is up) */
     if (android_up) {
         if (read_small(ROOTDIR "/state/apps.txt", apps, sizeof apps) < 0) apps[0] = 0;

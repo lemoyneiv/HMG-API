@@ -135,7 +135,7 @@ check "other: engine refused" "13" "$(code other engine status)"
 # --- services (the supervisor runs them as this user: off-car tests aren't root)
 S=$T/root/root
 mkdir -p "$S/mods/svc/bin"
-printf 'echo "started $HMGAPI_MOD/$HMGAPI_SERVICE data=$HMGAPI_DATA android_data=$ANDROID_DATA args=$*"\necho run >> "$HMGAPI_DATA/runs"\nexec '"$SLEEP"' 60\n' > "$S/mods/svc/bin/loop.sh"
+printf 'echo "started $HMGAPI_MOD/$HMGAPI_SERVICE data=$HMGAPI_DATA android_data=$ANDROID_DATA args=$*"\necho "${ANDROID_DNS_MODE:-system}" > "$HMGAPI_DATA/dns"\necho run >> "$HMGAPI_DATA/runs"\nexec '"$SLEEP"' 60\n' > "$S/mods/svc/bin/loop.sh"
 printf 'echo crash >> "$HMGAPI_DATA/runs"\nexit 3\n' > "$S/mods/svc/bin/crash.sh"
 printf 'echo once\n' > "$S/mods/svc/bin/once.sh"
 printf 'echo "dns=$ANDROID_DNS_MODE"\n' > "$S/mods/svc/bin/dns.sh"
@@ -202,7 +202,7 @@ check "... and so are processes it starts" svc "$(cat "$S/run/svc/ask/who2" 2>/d
 check "a plain root caller" root "$(run root whoami)"
 check "crashing service restarted with backoff" yes "$([ "$(grep -c crash "$S/run/svc/crash/runs")" -ge 3 ] && echo yes || echo no)"
 echo 1 > "$T/root/bootprop"
-waitfor '[ "$(st later)" = running ]' || true
+waitfor '[ "$(st later)" = running ] && [ -f "$S/run/svc/later/dns" ]' || true
 check "android service starts once Android is up" running "$(st later)"
 pid=$(run root services svc | awk '$2 == "loop" { print $4 }')
 check "restart asked" "restart svc/loop: asked" "$(run root service-restart svc loop)"
@@ -229,6 +229,15 @@ waitfor '[ -z "$(st loop)" ]' || true
 check "mod turned off (line gone): service stopped and dropped" "" "$(st loop)"
 check "public/services.txt drops stopped service" "" "$(grep "^$pid svc$" "$S/public/services.txt" || true)"
 check "... its process ended" no "$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)"
+check "service kept off cellular DNS initially" local "$(cat "$S/run/svc/later/dns")"
+printf 'svc 0\n' > "$S/state/service-gids.txt"
+waitfor '[ "$(grep -c run "$S/run/svc/later/runs" 2>/dev/null)" -ge 2 ]' || true
+check "service-gids.txt allows cellular: running service restarted onto system DNS" system "$(cat "$S/run/svc/later/dns")"
+has "... group change logged" "network group changed, restarting svc/later" "$(cat "$S/hmgapid.log")"
+printf 'svc 2950\n' > "$S/state/service-gids.txt"
+waitfor '[ "$(grep -c run "$S/run/svc/later/runs" 2>/dev/null)" -ge 3 ]' || true
+check "service-gids.txt revokes cellular: running service restarted back to local DNS" local "$(cat "$S/run/svc/later/dns")"
+rm -f "$S/state/service-gids.txt"
 check "app may list services" 0 "$(code app services)"
 check "other may not" 13 "$(code other services)"
 check "bad names refused" 2 "$(code root service-restart ../x loop)"
