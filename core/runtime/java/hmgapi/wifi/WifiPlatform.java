@@ -88,19 +88,26 @@ public interface WifiPlatform {
         public final int bat12vSoc;  // 0..100, or -1 if unknown
         public final boolean saver12v;
         public final int doorsClosed; // 1 = all closed, 0 = a door open, -1 = unknown
+        public final int doorsLocked; // 1 = all locked, 0 = any door unlocked, -1 = unknown
 
         public VehicleSnapshot(String power, boolean parked, boolean gearPark) {
-            this(power, parked, gearPark, false, false, -1, false, -1);
+            this(power, parked, gearPark, false, false, -1, false, -1, -1);
         }
 
         public VehicleSnapshot(String power, boolean parked, boolean gearPark,
                                boolean pluggedIn, boolean charging, int bat12vSoc, boolean saver12v) {
-            this(power, parked, gearPark, pluggedIn, charging, bat12vSoc, saver12v, -1);
+            this(power, parked, gearPark, pluggedIn, charging, bat12vSoc, saver12v, -1, -1);
         }
 
         public VehicleSnapshot(String power, boolean parked, boolean gearPark,
                                boolean pluggedIn, boolean charging, int bat12vSoc, boolean saver12v,
                                int doorsClosed) {
+            this(power, parked, gearPark, pluggedIn, charging, bat12vSoc, saver12v, doorsClosed, -1);
+        }
+
+        public VehicleSnapshot(String power, boolean parked, boolean gearPark,
+                               boolean pluggedIn, boolean charging, int bat12vSoc, boolean saver12v,
+                               int doorsClosed, int doorsLocked) {
             this.power = power == null ? "" : power.trim();
             this.parked = parked;
             this.gearPark = gearPark;
@@ -109,6 +116,7 @@ public interface WifiPlatform {
             this.bat12vSoc = bat12vSoc;
             this.saver12v = saver12v;
             this.doorsClosed = doorsClosed;
+            this.doorsLocked = doorsLocked;
         }
 
         public boolean isPowerOn() {

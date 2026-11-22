@@ -51,6 +51,7 @@ public final class HomeWifiControllerTest {
         testFlightLogPowerCutAndScrubbing();
         testAdmPreLatchDoorOpenAndSoftApHijackReclaim();
         testAdbOverWifiLifecycleAndScrubbing();
+        testLockedCabinIccuPlugLatchAndNoZombieReentry();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -884,6 +885,105 @@ public final class HomeWifiControllerTest {
             ctl.tickVehicleAndHealth();
             checkTrue("ADB disabled immediately on IG ON", !plat.adbEnabled);
             checkTrue("Session teardown does NOT defer firewall close", !plat.lastAdbDeferTeardown);
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testLockedCabinIccuPlugLatchAndNoZombieReentry() throws Exception {
+        File root = Files.createTempDirectory("hw-iccu-latch").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("GarageEV", "garage-ev-secret", true, "[WPA2-PSK-CCMP][ESS]", true);
+            store.setKeepAwakePolicy("30m", "plugged");
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.bootId = "2b7445cc-overnight";
+            plat.nowMs = 10000L;
+            // Car parked, EVSE plugged in, HV charging already completed (charging=false), doors closed & locked
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, true, false, 89, false, 1, 1);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+
+            int ip = ipToInt(192, 168, 1, 44);
+            int gw = ipToInt(192, 168, 1, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "GarageEV", "aa:bb:cc:dd:ee:99",
+                    -58, 5180, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+
+            checkTrue("Plugged & locked session holds parked power", plat.holdParkedPower);
+            check("Status reports unlimited plugged remainingSec=-1",
+                    Long.valueOf(-1), Json.object(ctl.statusJson()).get("keepAwakeRemainingSec"));
+
+            // At +87 minutes (03:19 AM), E-GMP ICCU 12V Aux. Battery Saver+ starts at 80% -> 92%
+            // and VCMS HS-CAN sleeps, dropping raw pluggedIn=false while doors stay closed (1) & locked (1)!
+            long t87m = 10000L + 87L * 60000L;
+            plat.nowMs = t87m;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 80, false, 1, 1);
+            ctl.tickVehicleAndHealth();
+            checkTrue("ICCU Aux Saver+ conn=0 drop while locked keeps holdParkedPower=true", plat.holdParkedPower);
+
+            // Advance +3 hours past CAN sleep while still locked & closed -> must NOT expire after 60s!
+            long t4h = t87m + 3L * 3600L * 1000L;
+            plat.nowMs = t4h;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 91, false, 1, 1);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Remains awake 3+ hours after VCMS CAN sleep while cabin stays locked", plat.holdParkedPower);
+            check("Still unlimited while latched in locked cabin",
+                    Long.valueOf(-1), Json.object(ctl.statusJson()).get("keepAwakeRemainingSec"));
+
+            // Verify stricter 65% MIN_12V_UNPLUGGED floor applies whenever raw pluggedIn==false && !charging:
+            HomeWifiKeepAwake kaCheck = new HomeWifiKeepAwake();
+            kaCheck.evaluate(new WifiPlatform.VehicleSnapshot("adm", true, true, true, false, 85, false, 1, 1),
+                    1000L, "b1", "30m", "plugged", null, true, true);
+            HomeWifiKeepAwake.Verdict v64a = kaCheck.evaluate(
+                    new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 64, false, 1, 1),
+                    2000L, "b1", "30m", "plugged", null, true, true);
+            checkTrue("1st sample at 64% (below 65% raw-unplugged floor) debounced", !v64a.cutBy12v && kaCheck.isPlugLatchedWhileLocked());
+            HomeWifiKeepAwake.Verdict v64b = kaCheck.evaluate(
+                    new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 64, false, 1, 1),
+                    3000L, "b1", "30m", "plugged", null, true, true);
+            checkTrue("2nd sample at 64% while raw pluggedIn==false trips 65% 12V guardian", v64b.cutBy12v && !v64b.holdPower);
+
+            // Morning (07:47 AM): owner presses Unlock on key fob (doorsLocked: 1 -> 0) while raw pluggedIn==false
+            long tUnlock = t4h + 60000L;
+            plat.nowMs = tUnlock;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 90, false, 1, 0);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Key-fob unlock immediately starts 60s unplug grace without dropping at t+0s", plat.holdParkedPower);
+
+            plat.nowMs = tUnlock + 30000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Still holding power at +30s of post-unlock unplug grace", plat.holdParkedPower);
+
+            plat.nowMs = tUnlock + 61000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Releases parked power once 60s post-unlock grace completes", !plat.holdParkedPower);
+            check("Enters sleep phase cleanly after expiry", "sleep", Json.object(ctl.statusJson()).get("phase"));
+
+            // Post-expiry zombie prevention:
+            //  1) OpenLink writing a 4s flushingFinalSync=true teardown lease must NOT spin up a new Wi-Fi session
+            File peerLeaseFile = new File(root, "data/hmgapi/public/openlink-keepawake.json");
+            peerLeaseFile.getParentFile().mkdirs();
+            Files.write(peerLeaseFile.toPath(),
+                    ("{\"bootId\":\"" + plat.bootId + "\",\"active\":true,\"unlimited\":false,"
+                            + "\"flushingFinalSync\":true,\"expiresAtElapsedMs\":" + (plat.nowMs + 4000L)
+                            + ",\"remainingSec\":4,\"updatedAtElapsedMs\":" + plat.nowMs + "}\n").getBytes("UTF-8"));
+            plat.nowMs += 1000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", true, true, false, false, 90, false, 1, 0);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Does NOT re-enter zombie session for peer flushingFinalSync teardown lease",
+                    !plat.holdWifiLock && !plat.holdParkedPower && "sleep".equals(Json.object(ctl.statusJson()).get("phase")));
+
+            //  2) Even if power steps to preparing_off, never start a new session
+            peerLeaseFile.delete();
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("preparing_off", true, true, true, false, 90, false, 1, 1);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Never starts a new parked session during preparing_off",
+                    !plat.holdWifiLock && !plat.holdParkedPower);
         } finally {
             deleteRec(root);
         }

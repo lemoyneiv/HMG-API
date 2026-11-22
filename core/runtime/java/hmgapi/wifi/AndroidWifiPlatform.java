@@ -73,6 +73,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private long lastPwrKeepAssertMs = 0L;
     private String lastPwrKeepWaitSig = "";
     private volatile int liveMicomDoorsClosed = -1;
+    private volatile int liveMicomDoorsLocked = -1;
     private volatile VehicleSnapshot lastGoodVehicle = null;
     private Binder micomPwrListener = null;
     private Binder micomBcmListener = null;
@@ -288,6 +289,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                     Class<?> ifaceCls = Class.forName(desc);
                     Class<?> stubCls = Class.forName(desc + "$Stub");
                     final int txDoors = readStaticIntField(stubCls, "TRANSACTION_onDoorAllStateChanged", -1);
+                    final int txStolen = readStaticIntField(stubCls, "TRANSACTION_onStolen", -1);
                     final int txIgn = readStaticIntField(stubCls, "TRANSACTION_onIgnitionChanged", -1);
                     final int txAcc = readStaticIntField(stubCls, "TRANSACTION_onACCChanged", -1);
                     Binder b = new Binder() {
@@ -301,15 +303,32 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                             try {
                                 if (code == txDoors) {
                                     data.enforceInterface(desc);
-                                    if (data.dataAvail() >= 32) {
-                                        for (int i = 0; i < 4; i++) data.readInt(); // 4 unlock states
-                                        boolean anyOpen = false;
+                                    if (data.dataAvail() >= 16) {
+                                        boolean allLocked = true;
+                                        boolean anyUnlocked = false;
                                         for (int i = 0; i < 4; i++) {
-                                            if (data.readInt() == 1) anyOpen = true;
+                                            int u = data.readInt(); // 0 = locked, 1 = unlocked
+                                            if (u != 0) allLocked = false;
+                                            if (u == 1) anyUnlocked = true;
                                         }
-                                        liveMicomDoorsClosed = anyOpen ? 0 : 1;
+                                        if (allLocked) liveMicomDoorsLocked = 1;
+                                        else if (anyUnlocked) liveMicomDoorsLocked = 0;
+                                        if (data.dataAvail() >= 16) {
+                                            boolean anyOpen = false;
+                                            for (int i = 0; i < 4; i++) {
+                                                if (data.readInt() == 1) anyOpen = true;
+                                            }
+                                            liveMicomDoorsClosed = anyOpen ? 0 : 1;
+                                        }
                                     }
                                     triggerVehiclePushWake();
+                                } else if (code == txStolen) {
+                                    data.enforceInterface(desc);
+                                    if (data.dataAvail() >= 4 && data.readInt() == 7) {
+                                        // CF_Gway_BCMArmState == 7: disarmed by key-fob / proximity unlock
+                                        liveMicomDoorsLocked = 0;
+                                        triggerVehiclePushWake();
+                                    }
                                 } else if (code == txIgn || code == txAcc) {
                                     triggerVehiclePushWake();
                                 }
@@ -321,6 +340,10 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                     };
                     Object proxy = stubCls.getMethod("asInterface", IBinder.class).invoke(null, b);
                     svc.getClass().getMethod("registerBCMListener", ifaceCls, IBinder.class).invoke(svc, proxy, b);
+                    try {
+                        svc.getClass().getMethod("getDoorLockStatus").invoke(svc);
+                    } catch (Throwable ignored) {
+                    }
                     micomBcmListener = b;
                 }
             } catch (Throwable ignored) {
@@ -399,7 +422,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 power = readDirectMicomPowerNameFallback();
             }
             VehicleSnapshot snap = new VehicleSnapshot(
-                    power, parked, gearPark, pluggedIn || charging, charging, bat12v, saver12v, doorsClosed);
+                    power, parked, gearPark, pluggedIn || charging, charging, bat12v, saver12v, doorsClosed, liveMicomDoorsLocked);
             lastGoodVehicle = snap;
             if (snap.isPowerOn()) {
                 restoreStandaloneDarkIfNeeded();
@@ -423,9 +446,11 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                             prev.charging,
                             prev.bat12vSoc,
                             prev.saver12v,
-                            liveMicomDoorsClosed >= 0 ? liveMicomDoorsClosed : prev.doorsClosed);
+                            liveMicomDoorsClosed >= 0 ? liveMicomDoorsClosed : prev.doorsClosed,
+                            liveMicomDoorsLocked >= 0 ? liveMicomDoorsLocked : prev.doorsLocked);
                 }
-                return new VehicleSnapshot(directPower, false, true, false, false, -1, false, liveMicomDoorsClosed);
+                return new VehicleSnapshot(directPower, false, true, false, false, -1, false,
+                        liveMicomDoorsClosed, liveMicomDoorsLocked);
             }
             if (prev != null) {
                 return prev;

@@ -45,9 +45,16 @@ public final class HomeWifiKeepAwake {
         public final long expiresAtElapsedMs;
         public final int remainingSec;
         public final long updatedAtElapsedMs;
+        public final boolean flushingFinalSync;
 
         public PeerLease(String bootId, boolean active, boolean unlimited, boolean cutBy12v,
                          long expiresAtElapsedMs, int remainingSec, long updatedAtElapsedMs) {
+            this(bootId, active, unlimited, cutBy12v, expiresAtElapsedMs, remainingSec, updatedAtElapsedMs, false);
+        }
+
+        public PeerLease(String bootId, boolean active, boolean unlimited, boolean cutBy12v,
+                         long expiresAtElapsedMs, int remainingSec, long updatedAtElapsedMs,
+                         boolean flushingFinalSync) {
             this.bootId = bootId == null ? "" : bootId.trim();
             this.active = active;
             this.unlimited = unlimited;
@@ -55,6 +62,7 @@ public final class HomeWifiKeepAwake {
             this.expiresAtElapsedMs = expiresAtElapsedMs;
             this.remainingSec = remainingSec;
             this.updatedAtElapsedMs = updatedAtElapsedMs;
+            this.flushingFinalSync = flushingFinalSync;
         }
 
         public boolean isFreshAndActive(String curBootId, long nowElapsedMs) {
@@ -118,6 +126,8 @@ public final class HomeWifiKeepAwake {
     private long disconnectedSinceMs = -1L;
     private long unplugGraceUntilMs = 0L;
     private boolean wasPluggedIn = false;
+    private boolean wasRawPluggedIn = false;
+    private boolean latchedPluggedWhileLocked = false;
     private boolean everConnectedThisPark = false;
     private boolean awayTimedOut = false;
     private int low12vSamples = 0;
@@ -130,6 +140,8 @@ public final class HomeWifiKeepAwake {
         disconnectedSinceMs = -1L;
         unplugGraceUntilMs = 0L;
         wasPluggedIn = false;
+        wasRawPluggedIn = false;
+        latchedPluggedWhileLocked = false;
         everConnectedThisPark = false;
         awayTimedOut = false;
         low12vSamples = 0;
@@ -147,6 +159,10 @@ public final class HomeWifiKeepAwake {
 
     public boolean isAwayTimedOut() {
         return awayTimedOut;
+    }
+
+    public boolean isPlugLatchedWhileLocked() {
+        return latchedPluggedWhileLocked;
     }
 
     public Verdict evaluate(WifiPlatform.VehicleSnapshot veh,
@@ -171,24 +187,41 @@ public final class HomeWifiKeepAwake {
             return new Verdict(false, false, false, false, false, "off", 0, 0L);
         }
 
+        // On E-GMP (Ioniq 5 / EV6), BMS 12V checks, ICCU Aux. Battery Saver+ (80% -> 92% LDC top-up),
+        // and subsequent VCMS HS-CAN sleep drop tm_hscan_service.getConnectStatus() to 0 even though
+        // the J1772/CCS cable is still physically locked in the charge port. Once raw pluggedIn was
+        // observed true with all doors locked & closed, keep effectivePlugged latched until IG ON or
+        // any door unlock (doorsLocked: 1 -> 0) / door open (doorsClosed == 0).
+        boolean rawPlugged = veh.pluggedIn;
+        boolean lockedAndClosed = (veh.doorsLocked == 1 && veh.doorsClosed != 0);
+        if (rawPlugged) {
+            latchedPluggedWhileLocked = lockedAndClosed;
+        } else if (latchedPluggedWhileLocked && !lockedAndClosed) {
+            latchedPluggedWhileLocked = false;
+        }
+        boolean effectivePlugged = rawPlugged || latchedPluggedWhileLocked;
+
         if (parkedStartMs < 0L) {
             parkedStartMs = nowElapsedMs;
             acquireWindowStartMs = nowElapsedMs;
-            wasPluggedIn = veh.pluggedIn;
-        } else if (wasPluggedIn && !veh.pluggedIn) {
-            unplugGraceUntilMs = nowElapsedMs + UNPLUG_GRACE_MS;
-            timerExpiredThisPark = false;
-            wasPluggedIn = false;
-        } else if (!wasPluggedIn && veh.pluggedIn) {
-            // Newly plugged in while parked: clear any prior unplugged timer expiration and
-            // grant a fresh 2-min home check if not yet connected (connects at home; sleeps at public EVSE).
-            timerExpiredThisPark = false;
-            wasPluggedIn = true;
-            if (!wifiConnected) {
-                acquireWindowStartMs = nowElapsedMs;
-                disconnectedSinceMs = -1L;
-                awayTimedOut = false;
+            wasPluggedIn = effectivePlugged;
+            wasRawPluggedIn = rawPlugged;
+        } else {
+            if (!wasRawPluggedIn && rawPlugged) {
+                // Newly plugged in while parked: clear any prior unplugged timer expiration and
+                // grant a fresh 2-min home check if not yet connected (connects at home; sleeps at public EVSE).
+                timerExpiredThisPark = false;
+                if (!wifiConnected) {
+                    acquireWindowStartMs = nowElapsedMs;
+                    disconnectedSinceMs = -1L;
+                    awayTimedOut = false;
+                }
+            } else if (wasPluggedIn && !effectivePlugged) {
+                unplugGraceUntilMs = nowElapsedMs + UNPLUG_GRACE_MS;
+                timerExpiredThisPark = false;
             }
+            wasPluggedIn = effectivePlugged;
+            wasRawPluggedIn = rawPlugged;
         }
 
         // Home detection: require connecting to an allowed Home Wi-Fi SSID within 2m (3m if seen/associating),
@@ -210,7 +243,9 @@ public final class HomeWifiKeepAwake {
             }
         }
 
-        // 12V Battery Guardian evaluation (2-sample debounce)
+        // 12V Battery Guardian evaluation (2-sample debounce).
+        // Deliberately checks rawPlugged (not latched) when !charging so the stricter 65%
+        // MIN_12V_UNPLUGGED floor protects the 12V battery whenever CAN reports conn==0!
         if (veh.charging) {
             if (veh.bat12vSoc >= 0 && veh.bat12vSoc < MIN_12V_CHARGING_EMERGENCY) {
                 low12vSamples++;
@@ -220,7 +255,7 @@ public final class HomeWifiKeepAwake {
                 cutBy12v = false; // active HV charging restores 12V bus via ICCU/LDC
             }
         } else {
-            int floor = veh.pluggedIn ? MIN_12V_PLUGGED_IDLE : MIN_12V_UNPLUGGED;
+            int floor = rawPlugged ? MIN_12V_PLUGGED_IDLE : MIN_12V_UNPLUGGED;
             boolean low = veh.saver12v || (veh.bat12vSoc >= 0 && veh.bat12vSoc < floor);
             if (low) {
                 low12vSamples++;
@@ -236,21 +271,21 @@ public final class HomeWifiKeepAwake {
                 && (peer.updatedAtElapsedMs <= 0L || Math.abs(nowElapsedMs - peer.updatedAtElapsedMs) <= PEER_FRESH_MS);
         if (cutBy12v || peerCut12v) {
             return new Verdict(false, false, false, true, false,
-                    veh.pluggedIn ? normalizePluggedCode(rawPluggedCode) : normalizeUnpluggedCode(rawUnpluggedCode),
+                    effectivePlugged ? normalizePluggedCode(rawPluggedCode) : normalizeUnpluggedCode(rawUnpluggedCode),
                     0, 0L);
         }
 
         String uCode = normalizeUnpluggedCode(rawUnpluggedCode);
         String pCode = normalizePluggedCode(rawPluggedCode);
-        String chosenCode = veh.pluggedIn ? pCode : uCode;
-        long ownDurMs = durationMsForCode(chosenCode, veh.pluggedIn);
+        String chosenCode = effectivePlugged ? pCode : uCode;
+        long ownDurMs = durationMsForCode(chosenCode, effectivePlugged);
 
         boolean ownConfigured = !"off".equals(chosenCode);
         boolean ownUnlimited = false;
         long ownExpiresAt = 0L;
         boolean ownActive = false;
 
-        if (!awayTimedOut) {
+        if (!awayTimedOut && !timerExpiredThisPark) {
             ownUnlimited = (ownDurMs == UNLIMITED_MS);
             if (ownUnlimited) {
                 ownActive = true;
@@ -282,7 +317,7 @@ public final class HomeWifiKeepAwake {
             remSec = (int) ((effectiveExpiresAt - nowElapsedMs + 999L) / 1000L);
         }
 
-        if (ownConfigured && !effectiveHoldPower && !awayTimedOut) {
+        if (ownConfigured && !ownActive && !awayTimedOut) {
             timerExpiredThisPark = true;
         }
 
@@ -406,13 +441,14 @@ public final class HomeWifiKeepAwake {
             boolean active = Boolean.TRUE.equals(m.get("active"));
             boolean unlimited = Boolean.TRUE.equals(m.get("unlimited"));
             boolean cut = Boolean.TRUE.equals(m.get("cutBy12vFloor"));
+            boolean flushing = Boolean.TRUE.equals(m.get("flushingFinalSync"));
             long exp = m.get("expiresAtElapsedMs") instanceof Number
                     ? ((Number) m.get("expiresAtElapsedMs")).longValue() : 0L;
             int rem = m.get("remainingSec") instanceof Number
                     ? ((Number) m.get("remainingSec")).intValue() : 0;
             long upd = m.get("updatedAtElapsedMs") instanceof Number
                     ? ((Number) m.get("updatedAtElapsedMs")).longValue() : 0L;
-            return new PeerLease(boot, active, unlimited, cut, exp, rem, upd);
+            return new PeerLease(boot, active, unlimited, cut, exp, rem, upd, flushing);
         } catch (Exception e) {
             return null;
         }

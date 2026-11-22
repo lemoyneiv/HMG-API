@@ -282,7 +282,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
         lastSleepGapMs = sleepGap;
 
-        String vehSig = veh.power + "|" + veh.parked + "|" + veh.pluggedIn + "|" + veh.charging + "|" + veh.saver12v;
+        String vehSig = veh.power + "|" + veh.parked + "|" + veh.pluggedIn + "|" + veh.charging
+                + "|" + veh.saver12v + "|" + veh.doorsClosed + "|" + veh.doorsLocked;
         if (!veh.isPowerOn() || sessionActive) {
             if (!vehSig.equals(lastLoggedVehicleSig)) {
                 lastLoggedVehicleSig = vehSig;
@@ -291,6 +292,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
                         + " gearPark=" + veh.gearPark
                         + " plugged=" + veh.pluggedIn
                         + " charging=" + veh.charging
+                        + " doorsClosed=" + veh.doorsClosed
+                        + " doorsLocked=" + veh.doorsLocked
                         + " soc12v=" + veh.bat12vSoc
                         + " saver12v=" + veh.saver12v;
                 recordFlight("VEHICLE_STATE", vMsg, vMsg, true);
@@ -344,19 +347,21 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         boolean offLong = evaluateOffLong(veh, nowElapsed);
         boolean hasHomeProfile = store.hasUsableHomeProfile();
+        HomeWifiKeepAwake.PeerLease peerLease = null;
 
         if (!veh.isPowerOn() && offLong) {
             String ownUnplugged = hasHomeProfile ? store.getKeepAwakeUnplugged() : "off";
             String ownPlugged = hasHomeProfile ? store.getKeepAwakePlugged() : "off";
             boolean wifiConnected = sessionActive && "connected".equals(phase);
             boolean homeSeenOrAssoc = isHomeNetworkSeenOrAssociating();
+            peerLease = store.readPeerOpenLinkLease();
             lastKeepAwakeVerdict = keepAwake.evaluate(
                     veh,
                     nowElapsed,
                     curBoot,
                     ownUnplugged,
                     ownPlugged,
-                    store.readPeerOpenLinkLease(),
+                    peerLease,
                     wifiConnected,
                     homeSeenOrAssoc);
             store.writeKeepAwakeLease(curBoot, lastKeepAwakeVerdict, veh, nowElapsed);
@@ -366,12 +371,14 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     + lastKeepAwakeVerdict.extendedByPeer + "|"
                     + lastKeepAwakeVerdict.awayFromHome + "|"
                     + lastKeepAwakeVerdict.cutBy12v + "|"
-                    + lastKeepAwakeVerdict.activeCode;
+                    + lastKeepAwakeVerdict.activeCode + "|"
+                    + keepAwake.isPlugLatchedWhileLocked();
             if (!verdictSig.equals(lastLoggedVerdictSig)) {
                 lastLoggedVerdictSig = verdictSig;
                 String kaMsg = "stayClient=" + lastKeepAwakeVerdict.shouldStayInClientMode
                         + " holdPower=" + lastKeepAwakeVerdict.holdPower
                         + " code=" + lastKeepAwakeVerdict.activeCode
+                        + " plugLatched=" + keepAwake.isPlugLatchedWhileLocked()
                         + " peer=" + lastKeepAwakeVerdict.extendedByPeer
                         + " away=" + lastKeepAwakeVerdict.awayFromHome
                         + " cut12v=" + lastKeepAwakeVerdict.cutBy12v
@@ -411,6 +418,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                         + " adb=" + adbTcpActive
                         + " power=" + (veh.power.isEmpty() ? "off" : veh.power)
                         + " plugged=" + veh.pluggedIn
+                        + " plugLatched=" + keepAwake.isPlugLatchedWhileLocked()
                         + " charging=" + veh.charging
                         + " soc12v=" + veh.bat12vSoc
                         + " holdPower=" + lastKeepAwakeVerdict.holdPower
@@ -449,7 +457,13 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         if (offLong) {
             if (hasHomeProfile) {
-                if (lastKeepAwakeVerdict.shouldStayInClientMode) {
+                boolean shuttingDownNow = "preparing_off".equalsIgnoreCase(veh.power)
+                        || "off".equalsIgnoreCase(veh.power);
+                boolean onlyPeerTeardownFlush = !lastKeepAwakeVerdict.ownHoldPower
+                        && lastKeepAwakeVerdict.extendedByPeer
+                        && peerLease != null
+                        && peerLease.flushingFinalSync;
+                if (lastKeepAwakeVerdict.shouldStayInClientMode && !shuttingDownNow && !onlyPeerTeardownFlush) {
                     enterClientSession("Car parked / powered off");
                     platform.setSessionLocks(true, lastKeepAwakeVerdict.holdPower);
                 } else {
@@ -495,15 +509,18 @@ public final class HomeWifiController implements WifiPlatform.Events {
                                            String curBoot,
                                            long nowElapsed,
                                            boolean hasHomeProfile) {
-        if (veh == null || veh.isPowerOn() || veh.saver12v) return false;
+        if (veh == null || veh.isPowerOn() || veh.saver12v || keepAwake.isCutBy12v()) return false;
+        if ("preparing_off".equalsIgnoreCase(veh.power) || "off".equalsIgnoreCase(veh.power)) return false;
         int floor = veh.pluggedIn ? HomeWifiKeepAwake.MIN_12V_PLUGGED_IDLE : HomeWifiKeepAwake.MIN_12V_UNPLUGGED;
         if (!veh.charging && veh.bat12vSoc >= 0 && veh.bat12vSoc < floor) return false;
         HomeWifiKeepAwake.PeerLease peer = store.readPeerOpenLinkLease();
-        if (peer != null && peer.isFreshAndActive(curBoot, nowElapsed)) {
+        if (peer != null && peer.isFreshAndActive(curBoot, nowElapsed) && !peer.flushingFinalSync) {
             return true;
         }
+        if (keepAwake.isTimerExpiredThisPark() || keepAwake.isAwayTimedOut()) return false;
         if (!hasHomeProfile) return false;
-        String code = veh.pluggedIn
+        boolean effPlugged = veh.pluggedIn || keepAwake.isPlugLatchedWhileLocked();
+        String code = effPlugged
                 ? HomeWifiKeepAwake.normalizePluggedCode(store.getKeepAwakePlugged())
                 : HomeWifiKeepAwake.normalizeUnpluggedCode(store.getKeepAwakeUnplugged());
         return !"off".equals(code);
