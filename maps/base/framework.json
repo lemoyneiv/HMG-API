@@ -802,6 +802,17 @@
     "ret": "com.hkmc.mode.IModeManager",
     "static": true
   },
+  "framework.navi_tbt_trap_info": {
+    "class": "com.hkmc.cluster.NavigationCluster$NaviTbtTrapInfo"
+  },
+  "framework.navi_tbt_trap_info.bar_graph_level": {
+    "field": "barGraphLevel",
+    "type": "int",
+    "static": false
+  },
+  "framework.navi_tbt_trap_info.new": {
+    "ctor": []
+  },
   "framework.navigation_cluster": {
     "class": "com.hkmc.cluster.NavigationCluster"
   },
@@ -920,6 +931,38 @@
       "float",
       "int",
       "int"
+    ],
+    "ret": "void",
+    "static": false
+  },
+  "framework.navigation_cluster.update_tbt_trap_info": {
+    "method": "updateTBTTrapInfo",
+    "params": [
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int"
+    ],
+    "ret": "void",
+    "static": false
+  },
+  "framework.navigation_cluster.update_tbt_trap_info_new": {
+    "method": "updateTBTTrapInfoNew",
+    "params": [
+      "com.hkmc.cluster.NavigationCluster$NaviTbtTrapInfo"
     ],
     "ret": "void",
     "static": false

@@ -194,7 +194,11 @@ cat > "$F/bin/app_process" <<'S'
 #!/bin/sh
 echo "app_process $* key=$HMGAPI_WIFI_PSK has=$HMGAPI_WIFI_HAS_PSK"
 S
-chmod +x "$F/bin/app_process"
+cat > "$F/bin/service" <<'S'
+#!/bin/sh
+echo "Service $2: found"
+S
+chmod +x "$F/bin/app_process" "$F/bin/service"
 has "wifi.sh service mode launches HomeWifiDaemon" "app_process /system/bin --nice-name=hmgapi.wifi hmgapi.wifi.HomeWifiDaemon" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" deadbeef)"
 has "wifi.sh CLI fallback forwards status" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli status" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" status)"
 has "wifi.sh CLI fallback forwards use off" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli use CAR_CAM_1 off" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" use CAR_CAM_1 off)"
@@ -226,6 +230,7 @@ FW=$F/fw PATH=$F/bin:$PATH ip route replace default via 10.4.0.1 dev wlan0
 FW=$F/fw PATH=$F/bin:$PATH ip route replace 10.4.0.0/16 dev wlan0 proto kernel
 
 javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" \
+    core/runtime/test/hmgapi/engine/WifiApTest.java \
     core/runtime/java/hmgapi/wifi/WifiSecurity.java \
     core/runtime/java/hmgapi/wifi/WifiPlatform.java \
     core/runtime/java/hmgapi/wifi/HomeWifiKeepAwake.java \
@@ -234,6 +239,7 @@ javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" \
     core/runtime/java/hmgapi/wifi/HomeWifiRouter.java \
     core/runtime/java/hmgapi/wifi/HomeWifiController.java \
     core/runtime/test/hmgapi/wifi/HomeWifiControllerTest.java
+java -cp "$CP" hmgapi.engine.WifiApTest || fail=1
 FW=$F/fw PATH=$F/bin:$PATH java -cp "$CP" hmgapi.wifi.HomeWifiControllerTest || fail=1
 
 done=1

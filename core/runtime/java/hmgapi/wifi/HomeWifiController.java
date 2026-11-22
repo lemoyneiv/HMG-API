@@ -267,6 +267,13 @@ public final class HomeWifiController implements WifiPlatform.Events {
             recordFlight("STR_RESUME", strDetail, strDetail, true);
             if (veh.isPowerOn()) {
                 powerOffSinceMs = -1L;
+                if (!sessionActive && !pendingApRestoreOnPowerOn
+                        && store.isProjectionApRequested()
+                        && !platform.isSoftApActiveOrEnabling()
+                        && platform.getWifiState() == WifiPlatform.WIFI_STATE_DISABLED) {
+                    platform.restoreSoftAp(2);
+                    recordFlight("STR_PROJECTION_AP", "mode=2", "mode=2", false);
+                }
             }
             if (manualActive) {
                 manualActive = false;

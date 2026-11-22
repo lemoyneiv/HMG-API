@@ -175,6 +175,21 @@ public final class HomeWifiDaemon {
         return new File("/");
     }
 
+    private static boolean isHomeWifiAppliedInState(File rootDir) {
+        File txt = new File(rootDir, "data/hmgapi/state/wifi.txt");
+        if (txt.isFile()) {
+            try {
+                for (String line : HomeWifiStore.readText(txt).split("\n")) {
+                    if ("home".equals(line.trim())) return true;
+                }
+                return false;
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return new File(rootDir, "data/hmgapi/state/wifi.sh").isFile();
+    }
+
     // ---- Offline CLI fallback (when @hmgapi-wifi isn't running yet or during teardown) ----
 
     private static int runOfflineCli(String[] rawArgs) {
@@ -202,6 +217,17 @@ public final class HomeWifiDaemon {
             store.writePublicStatus("off", 0, 0);
             return 0;
         }
+
+        boolean offlineConfigOrLog = "keepawake".equals(verb) || "adb".equals(verb)
+                || "log".equals(verb) || "log-usb".equals(verb) || "log-clear".equals(verb);
+        if (!offlineConfigOrLog && !isHomeWifiAppliedInState(rootDir)) {
+            boolean switchedOn = new File(rootDir, "data/hmgapi/settings/allow/home_wifi").isFile();
+            System.out.println(switchedOn
+                    ? "Home Wi-Fi isn't applied yet (tap Apply changes, then restart)"
+                    : "Home Wi-Fi is off (HMG-API settings)");
+            return 1;
+        }
+
         if ("saved".equals(verb)) {
             for (HomeWifiStore.Profile p : store.listProfiles()) {
                 System.out.println(p.ssid);

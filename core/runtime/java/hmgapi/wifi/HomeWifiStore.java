@@ -69,6 +69,7 @@ public final class HomeWifiStore {
     private final File seenFile;
     private final File apModeFile;
     private final File modeBootFile;
+    private final File stateWifiTxt;
     private final HomeWifiFlightLog flightLog;
     private final Map<String, Profile> profilesByLower = new LinkedHashMap<String, Profile>();
     private String keepAwakeUnplugged = HomeWifiKeepAwake.DEFAULT_UNPLUGGED;
@@ -87,6 +88,7 @@ public final class HomeWifiStore {
         this.seenFile = new File(wifiDir, "seen");
         this.apModeFile = new File(wifiDir, "apmode");
         this.modeBootFile = new File(wifiDir, "mode");
+        this.stateWifiTxt = new File(hmgDir, "state/wifi.txt");
         this.flightLog = new HomeWifiFlightLog(base);
         loadProfiles();
     }
@@ -94,6 +96,17 @@ public final class HomeWifiStore {
     public File wifiDir() { return wifiDir; }
 
     public HomeWifiFlightLog flightLog() { return flightLog; }
+
+    public boolean isProjectionApRequested() {
+        try {
+            if (!stateWifiTxt.isFile()) return false;
+            for (String line : readText(stateWifiTxt).split("\n")) {
+                if (line.trim().startsWith("projection ")) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
 
     public synchronized String getKeepAwakeUnplugged() {
         return keepAwakeUnplugged;
@@ -460,6 +473,10 @@ public final class HomeWifiStore {
             if (pubDir != null) pubDir.mkdirs();
             String json = "{\"state\": \"" + state + "\", \"rssi\": " + rssi + ", \"freq\": " + freq + "}\n";
             if (publicWifiJson.isFile() && json.equals(readText(publicWifiJson))) {
+                long now = System.currentTimeMillis();
+                if (now - publicWifiJson.lastModified() >= 15000L) {
+                    publicWifiJson.setLastModified(now);
+                }
                 return;
             }
             writeAtomic(publicWifiJson, json, true);

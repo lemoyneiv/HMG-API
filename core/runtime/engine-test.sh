@@ -393,8 +393,16 @@ rm -f $HS
 rm -rf $R/data/hmgapi/mods/*
 mkdir -p $R/data/hmgapi/mods/hc; printf '{"id": "hc", "version": "1.0.0", "wifi": {"hotspot": "yes"}}\n' > $R/data/hmgapi/mods/hc/mod.json
 eng plan
-has "\"wifi\" with another value: refused, with the form" '"wifi": {"client": true}, {"hotspot": true} and/or {"home": true}' "$out"
+has "\"wifi\" with another value: refused, with the form" '"wifi": {"client": true}, {"hotspot": true}, {"projection": true} and/or {"home": true}' "$out"
 rm -rf $R/data/hmgapi/mods/hc
+mkdir -p $R/data/hmgapi/mods/hp; printf '{"id": "hp", "version": "1.0.0", "wifi": {"projection": true}}\n' > $R/data/hmgapi/mods/hp/mod.json
+eng apply
+check "\"wifi\": {\"projection\": true} applies" 0 $rc
+has "... powers the chip via the hotspot feature" '<feature name="com.hkmc.software.wifihotspot" />' "$(cat $HS 2>/dev/null)"
+check "... records projection ask in state/wifi.txt" "projection hp" "$(cat $R/data/hmgapi/state/wifi.txt)"
+has "... schedules wifi.sh at boot" "hmgapi wifi root boot yes script /data/hmgapi/state/wifi.sh" "$(cat $R/data/hmgapi/state/services.txt)"
+rm -rf $R/data/hmgapi/mods/hp
+eng restore
 
 # ---- one engine run at a time (rc.5: the app's two plans after a USB install raced on .features/*.tmp)
 rm -rf $R/data/hmgapi/mods/* $R/data/hmgapi/state $R/data/hmgapi/stock
