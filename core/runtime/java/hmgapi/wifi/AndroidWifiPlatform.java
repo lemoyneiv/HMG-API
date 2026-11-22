@@ -69,7 +69,6 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private boolean parkedDarkEntered = false;
     private boolean standaloneDarkBlanked = false;
     private boolean standaloneMutedAv = false;
-    private boolean standaloneTurnedAvOff = false;
     private final Map<String, Integer> savedBacklight = new LinkedHashMap<String, Integer>();
     private long lastPwrKeepAssertMs = 0L;
     private String lastPwrKeepWaitSig = "";
@@ -759,13 +758,6 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                                 if (!userMuted) standaloneMutedAv = true;
                             } catch (Throwable ignored) {}
                         }
-                        Object mode = getMicomBinder("com.hkmc.micom.mode", "com.hkmc.mode.IModeManager$Stub");
-                        if (mode != null) {
-                            try {
-                                mode.getClass().getMethod("setAVOn", boolean.class).invoke(mode, Boolean.FALSE);
-                                standaloneTurnedAvOff = true;
-                            } catch (Throwable ignored) {}
-                        }
                     }
                 }
                 try { pwr.getClass().getMethod("setScreenOn", boolean.class).invoke(pwr, Boolean.FALSE); } catch (Throwable ignored) {}
@@ -776,7 +768,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             }
             Object bsSvc = getMicomBinder("com.hkmc.micom.blackscreen", "com.hkmc.power.IBlackScreenService$Stub");
             if (bsSvc != null) {
-                try { bsSvc.getClass().getMethod("showBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
+                // Omit showBlackScreen() so Mobis never launches the Clock Screen Saver widget
                 try { bsSvc.getClass().getMethod("screenOff").invoke(bsSvc); } catch (Throwable ignored) {}
             }
             blankSysfsBacklightStandalone();
@@ -792,7 +784,8 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         try {
             Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
             if (pwr != null) {
-                try { pwr.getClass().getMethod("powerOn").invoke(pwr); } catch (Throwable ignored) {}
+                // Do NOT call powerOn() or ModeManager.setAVOn(true) — waking before Wireless
+                // CarPlay/AA reconnects would cause ModeManager to fall back to FM Radio!
                 try { pwr.getClass().getMethod("setScreenOn", boolean.class).invoke(pwr, Boolean.TRUE); } catch (Throwable ignored) {}
                 try {
                     pwr.getClass().getMethod("requestLcdControl", boolean.class, boolean.class, boolean.class, boolean.class)
@@ -803,13 +796,6 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             if (bsSvc != null) {
                 try { bsSvc.getClass().getMethod("hideBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
                 try { bsSvc.getClass().getMethod("screenOn").invoke(bsSvc); } catch (Throwable ignored) {}
-            }
-            if (standaloneTurnedAvOff) {
-                standaloneTurnedAvOff = false;
-                Object mode = getMicomBinder("com.hkmc.micom.mode", "com.hkmc.mode.IModeManager$Stub");
-                if (mode != null) {
-                    try { mode.getClass().getMethod("setAVOn", boolean.class).invoke(mode, Boolean.TRUE); } catch (Throwable ignored) {}
-                }
             }
             if (standaloneMutedAv) {
                 standaloneMutedAv = false;

@@ -563,6 +563,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         store.flightLog().clearSessionActive();
         platform.routeDown();
         store.clearLease();
+        store.writePublicStatus("waiting", 0, 0);
         platform.setSessionLocks(false, false);
 
         String ownEnd = "reason=\"" + reason + "\" restoreApNow=" + restoreApNow
@@ -599,7 +600,6 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 detail = "Home Wi-Fi completed its parked keep-awake window and is ready to sleep.";
             }
         }
-        store.writePublicStatus("waiting", 0, 0);
     }
 
     private void enableStationHardware() {
@@ -1565,7 +1565,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             return new CmdResult(0, sb.toString());
         }
         if ("now".equals(verb) || "scan".equals(verb)) {
-            String minArg = args.size() >= 2 ? args.get(1) : "30";
+            String minArg = args.size() >= 2 ? args.get(1) : "0";
             return cmdActivateOrScan(minArg, "scan".equals(verb));
         }
         if ("back".equals(verb)) {
@@ -1714,7 +1714,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             if (!veh.isPowerOn() || veh.gearPark) {
                 if (veh.isPowerOn()) {
                     manualActive = true;
-                    manualDeadlineMs = platform.elapsedRealtimeMs() + 30L * 60000L;
+                    manualDeadlineMs = 0L;
                 }
                 enterClientSession("Connect to selected network");
                 scheduleVehicleTick();
@@ -1813,7 +1813,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     }
 
     private static int parseMinutes(String raw) {
-        if (raw == null || raw.trim().isEmpty()) return 30;
+        if (raw == null || raw.trim().isEmpty()) return 0;
         String s = raw.trim();
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

@@ -784,6 +784,19 @@ public final class HomeWifiControllerTest {
                     "up", Json.object(HomeWifiStore.readText(wifiPub)).get("state"));
             checkTrue("Flight log recorded SOFTAP_RECLAIM",
                     store.flightLog().readPublicTail(65536).contains("SOFTAP_RECLAIM"));
+
+            // 4. Resume IG ON: wifi.json must flip to 'waiting' BEFORE restoreSoftAp() sleeps/completes
+            //    so OpenLink drops ip rule 905 at t=0ms instead of 5s later!
+            plat.wifiPubFile = wifiPub;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true);
+            ctl.tickVehicleAndHealth();
+            check("Public wifi.json cleared to waiting BEFORE restoreSoftAp completes",
+                    "waiting", plat.wifiStateDuringRestoreAp);
+
+            // 5. Untimed manual scan in Park ("scan" / "0") has no arbitrary 30m cutoff (manualRemainingSec == -1)
+            ctl.handleCommand(Arrays.asList("scan", "0"));
+            check("Untimed Park scan sets manualRemainingSec=-1",
+                    Long.valueOf(-1), Json.object(ctl.statusJson()).get("manualRemainingSec"));
         } finally {
             deleteRec(root);
         }
@@ -875,6 +888,9 @@ public final class HomeWifiControllerTest {
             if (r != null) r.run();
         }
 
+        File wifiPubFile = null;
+        String wifiStateDuringRestoreAp = "";
+
         @Override public void setEventListener(Events l) { this.listener = l; }
         @Override public long elapsedRealtimeMs() { return nowMs; }
         @Override public long uptimeMillis() { return nowMs - suspendOffsetMs; }
@@ -893,6 +909,12 @@ public final class HomeWifiControllerTest {
 
         @Override
         public boolean restoreSoftAp(int mode) {
+            if (wifiPubFile != null && wifiPubFile.isFile()) {
+                try {
+                    wifiStateDuringRestoreAp = String.valueOf(Json.object(HomeWifiStore.readText(wifiPubFile)).get("state"));
+                } catch (Exception ignored) {
+                }
+            }
             wifiState = WIFI_STATE_DISABLED;
             softApActive = true;
             softApMode = mode;

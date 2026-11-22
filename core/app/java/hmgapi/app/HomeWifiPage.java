@@ -444,29 +444,14 @@ final class HomeWifiPage {
         controlsHolder.removeAllViews();
         Ui.gap(controlsHolder, 6);
 
-        final SharedPreferences prefs = a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE);
-
         if (!active) {
             LinearLayout btnRow = Ui.row(a);
             controlsHolder.addView(btnRow);
 
-            final CheckBox limitBox = new CheckBox(a);
-            final EditText minutesInput = new EditText(a);
-
             Ui.button(btnRow, "Scan & Connect Now", true, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    String minsArg = "0";
-                    if (limitBox.isChecked()) {
-                        int m = parseMinutesInput(minutesInput.getText().toString());
-                        if (m < 1 || m > 240) {
-                            a.message("Home Wi-Fi", "Enter a duration between 1 and 240 minutes, or uncheck \"Auto-disconnect after\" for no time limit while in Park.");
-                            return;
-                        }
-                        prefs.edit().putInt("wifi_now_minutes", m).apply();
-                        minsArg = String.valueOf(m);
-                    }
-                    runWifiAction("scan", minsArg, null, false);
+                    runWifiAction("scan", "0", null, false);
                 }
             });
             Ui.button(btnRow, "Session Log", false, new View.OnClickListener() {
@@ -476,32 +461,9 @@ final class HomeWifiPage {
                 }
             });
 
-            LinearLayout timerRow = Ui.row(a);
-            controlsHolder.addView(timerRow);
-            limitBox.setText("Auto-disconnect after ");
-            limitBox.setTextColor(Ui.TEXT);
-            Ui.size(limitBox, 17);
-            limitBox.setChecked(prefs.getBoolean("wifi_now_timer", true));
-            timerRow.addView(limitBox);
-
-            minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-            minutesInput.setSingleLine(true);
-            minutesInput.setEms(3);
-            minutesInput.setTextColor(Ui.TEXT);
-            Ui.size(minutesInput, 17);
-            minutesInput.setText(String.valueOf(prefs.getInt("wifi_now_minutes", 30)));
-            minutesInput.setEnabled(limitBox.isChecked());
-            timerRow.addView(minutesInput);
-
-            Ui.text(timerRow, " minutes  (always disconnects automatically when shifted out of Park)", 16, false, Ui.GREY);
-
-            limitBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-                @Override
-                public void onCheckedChanged(CompoundButton b, boolean on) {
-                    minutesInput.setEnabled(on);
-                    prefs.edit().putBoolean("wifi_now_timer", on).apply();
-                }
-            });
+            Ui.text(controlsHolder,
+                    "Temporarily pauses Wireless CarPlay / Android Auto while in Park; disconnects automatically when shifted out of Park.",
+                    15, false, Ui.GREY);
         } else {
             LinearLayout btnRow = Ui.row(a);
             controlsHolder.addView(btnRow);
@@ -509,7 +471,7 @@ final class HomeWifiPage {
                 @Override
                 public void onClick(View v) {
                     Toast.makeText(a, "Scanning for nearby Wi-Fi networks…", Toast.LENGTH_SHORT).show();
-                    runWifiAction("scan", "30", null, true);
+                    runWifiAction("scan", "0", null, true);
                 }
             });
             Ui.button(btnRow, "Disconnect & Resume CarPlay / AA", false, new View.OnClickListener() {
@@ -1058,14 +1020,6 @@ final class HomeWifiPage {
                 }
             }
         }.start(a);
-    }
-
-    private static int parseMinutesInput(String text) {
-        try {
-            return Integer.parseInt(text.trim());
-        } catch (NumberFormatException e) {
-            return -1;
-        }
     }
 
     private static boolean isValidWpaKey(String pass) {
