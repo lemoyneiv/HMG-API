@@ -52,12 +52,16 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private final Map<String, Runnable> scheduled = new HashMap<String, Runnable>();
 
     private volatile Events eventListener;
+    private volatile HomeWifiFlightLog flightLog;
     private boolean receiverRegistered = false;
     private WifiConfiguration savedApConfig = null;
     private WifiManager.WifiLock wifiLock = null;
     private PowerManager.WakeLock cpuWakeLock = null;
+    private boolean wifiLockRecorded = false;
+    private boolean wakeLockRecorded = false;
     private boolean pwrKeepHeld = false;
     private long lastPwrKeepAssertMs = 0L;
+    private String lastPwrKeepWaitSig = "";
     private final File peerOpenLinkLeaseFile = new File("/data/hmgapi/public/openlink-keepawake.json");
 
     private final BroadcastReceiver wifiReceiver = new BroadcastReceiver() {
@@ -345,8 +349,19 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
+    public void setFlightLog(HomeWifiFlightLog log) {
+        this.flightLog = log;
+    }
+
+    private void recordPlatformFlight(String tag, String detail, boolean doFsync) {
+        HomeWifiFlightLog fl = this.flightLog;
+        if (fl == null) return;
+        fl.recordEvent(wallEpochSec(), elapsedRealtimeMs(), bootId(), tag, detail, detail, doFsync);
+    }
+
     @Override
     public void setSessionLocks(boolean holdWifiLock, boolean holdParkedPower) {
+        boolean wifiNow = wifiLockRecorded;
         if (wifiLock != null) {
             try {
                 if (holdWifiLock && !wifiLock.isHeld()) {
@@ -354,9 +369,11 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 } else if (!holdWifiLock && wifiLock.isHeld()) {
                     wifiLock.release();
                 }
+                wifiNow = wifiLock.isHeld();
             } catch (Throwable ignored) {
             }
         }
+        boolean wakeNow = wakeLockRecorded;
         if (cpuWakeLock != null) {
             try {
                 if (holdParkedPower && !cpuWakeLock.isHeld()) {
@@ -364,13 +381,20 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 } else if (!holdParkedPower && cpuWakeLock.isHeld()) {
                     cpuWakeLock.release();
                 }
+                wakeNow = cpuWakeLock.isHeld();
             } catch (Throwable ignored) {
             }
+        }
+        if (wifiNow != wifiLockRecorded || wakeNow != wakeLockRecorded) {
+            wifiLockRecorded = wifiNow;
+            wakeLockRecorded = wakeNow;
+            recordPlatformFlight("OS_LOCKS", "wifiLock=" + wifiNow + " wakeLock=" + wakeNow, true);
         }
         if (holdParkedPower) {
             long now = elapsedRealtimeMs();
             if (!pwrKeepHeld || (now - lastPwrKeepAssertMs) >= PWRKEEP_REFRESH_MS) {
-                if (assertMicomPwrKeepDarkSafe()) {
+                boolean isRefresh = pwrKeepHeld;
+                if (assertMicomPwrKeepDarkSafe(isRefresh)) {
                     if (!pwrKeepHeld) {
                         log("Acquired parked MICOM PwrKeep(1) + PARTIAL_WAKE_LOCK");
                     }
@@ -378,14 +402,19 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                     lastPwrKeepAssertMs = now;
                 }
             }
-        } else if (pwrKeepHeld) {
-            pwrKeepHeld = false;
-            lastPwrKeepAssertMs = 0L;
-            if (!isPeerOpenLinkHoldingPower()) {
-                releaseMicomPwrKeepQuietly();
-                log("Released parked MICOM PwrKeep(1)");
-            } else {
-                log("Deferred MICOM PwrKeepStop(1) to active OpenLink lease");
+        } else {
+            lastPwrKeepWaitSig = "";
+            if (pwrKeepHeld) {
+                pwrKeepHeld = false;
+                lastPwrKeepAssertMs = 0L;
+                if (!isPeerOpenLinkHoldingPower()) {
+                    releaseMicomPwrKeepQuietly();
+                    recordPlatformFlight("PWRKEEP_STOP", "peerHold=false", true);
+                    log("Released parked MICOM PwrKeep(1)");
+                } else {
+                    recordPlatformFlight("PWRKEEP_DEFER_PEER", "peerHold=true", true);
+                    log("Deferred MICOM PwrKeepStop(1) to active OpenLink lease");
+                }
             }
         }
     }
@@ -415,26 +444,40 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
-    private boolean assertMicomPwrKeepDarkSafe() {
+    private boolean assertMicomPwrKeepDarkSafe(boolean isRefresh) {
         try {
             Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
-            if (pwr == null) return false;
+            if (pwr == null) {
+                if (!"no_pwr_binder".equals(lastPwrKeepWaitSig)) {
+                    lastPwrKeepWaitSig = "no_pwr_binder";
+                    recordPlatformFlight("PWRKEEP_WAIT", "reason=no_pwr_binder", true);
+                }
+                return false;
+            }
             Object pwrStObj = pwr.getClass().getMethod("getPowerStatus").invoke(pwr);
             int pwrSt = pwrStObj instanceof Number ? ((Number) pwrStObj).intValue() : -1;
-            if (pwrSt == 0) return false; // ACC_ON: car is on, never hold parked PwrKeep
+            int admSt = -1;
+            try {
+                Object admObj = pwr.getClass().getMethod("getADMSetupStatus").invoke(pwr);
+                if (admObj instanceof Number) admSt = ((Number) admObj).intValue();
+            } catch (Throwable ignored) {
+            }
+            boolean prepOff = false;
+            try {
+                prepOff = Boolean.TRUE.equals(pwr.getClass().getMethod("isPreparingSystemOff").invoke(pwr));
+            } catch (Throwable ignored) {
+            }
 
+            boolean ignOn = false;
             Object bcm = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
             if (bcm != null) {
                 try {
                     Object ign = bcm.getClass().getMethod("getIGNStatus").invoke(bcm);
-                    if (Boolean.TRUE.equals(ign) || (ign instanceof Number && ((Number) ign).intValue() == 1)) {
-                        return false;
-                    }
+                    ignOn = Boolean.TRUE.equals(ign) || (ign instanceof Number && ((Number) ign).intValue() == 1);
                 } catch (Throwable ignored) {
                 }
             }
 
-            // Wait until MICOM has entered ADM / display-off before asserting PwrKeep(1)
             boolean avOff = false;
             try {
                 avOff = Boolean.TRUE.equals(pwr.getClass().getMethod("isAvPowerOff").invoke(pwr));
@@ -448,20 +491,46 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 } catch (Throwable ignored) {
                 }
             }
+
+            String stateSummary = "pwrSt=" + pwrSt + " admSt=" + admSt + " prepOff=" + prepOff
+                    + " ign=" + ignOn + " avOff=" + avOff + " bs=" + bsShown;
+
+            if (pwrSt == 0 || ignOn) {
+                String sig = "ign_active|" + stateSummary;
+                if (!sig.equals(lastPwrKeepWaitSig)) {
+                    lastPwrKeepWaitSig = sig;
+                    recordPlatformFlight("PWRKEEP_WAIT", "reason=ign_active " + stateSummary, true);
+                }
+                return false;
+            }
             if (!avOff && !bsShown && pwrSt == 1) {
                 // Still in Retained Accessory Power before driver door opens
+                String sig = "rap_wait|" + stateSummary;
+                if (!sig.equals(lastPwrKeepWaitSig)) {
+                    lastPwrKeepWaitSig = sig;
+                    recordPlatformFlight("PWRKEEP_WAIT", "reason=rap_wait " + stateSummary, true);
+                }
                 return false;
             }
 
             pwr.getClass().getMethod("requestPwrKeepStart", int.class).invoke(pwr, Integer.valueOf(1));
 
+            boolean peerHold = isPeerOpenLinkHoldingPower();
             // Ensure panel stays dark if OpenLink isn't already managing backlight
-            if (!isPeerOpenLinkHoldingPower() && bsSvc != null && !bsShown) {
+            if (!peerHold && bsSvc != null && !bsShown) {
                 try { bsSvc.getClass().getMethod("showBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
                 try { bsSvc.getClass().getMethod("screenOff").invoke(bsSvc); } catch (Throwable ignored) {}
             }
+            lastPwrKeepWaitSig = "";
+            recordPlatformFlight(isRefresh ? "PWRKEEP_REFRESH" : "PWRKEEP_START",
+                    stateSummary + " peerHold=" + peerHold, true);
             return true;
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            String errSig = "err:" + t.getClass().getSimpleName();
+            if (!errSig.equals(lastPwrKeepWaitSig)) {
+                lastPwrKeepWaitSig = errSig;
+                recordPlatformFlight("PWRKEEP_ERR", "err=" + t.getClass().getSimpleName(), true);
+            }
             return false;
         }
     }

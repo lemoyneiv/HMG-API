@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
+import android.graphics.Typeface;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -12,6 +13,7 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -129,9 +131,9 @@ final class HomeWifiPage {
 
         // Parked Keep-Awake section (Unplugged vs. Plugged In)
         Ui.text(page, "Keep Awake When Parked", 22, true, Ui.TEXT);
-        Ui.text(page, "Keeps the head unit powered with the screen completely dark after you turn off the car so Home Wi-Fi "
-                + "stays connected. Automatically coordinates with OpenLink (staying awake for whichever timer is longer) and "
-                + "disconnects early if the 12V battery gets low.", 15, false, Ui.GREY);
+        Ui.text(page, "Keeps the head unit powered with the screen dark after turning off the car while connected to a saved "
+                + "Home Wi-Fi network. If no saved Home Wi-Fi connects within 2 minutes (away from home) and OpenLink isn't "
+                + "keeping the car awake, the head unit powers off normally.", 15, false, Ui.GREY);
 
         LinearLayout kaCard = Ui.column(a);
         kaCard.setBackground(Ui.box(a, Ui.PANEL, Ui.LINE, 10));
@@ -279,9 +281,9 @@ final class HomeWifiPage {
         if (!ctrlSig.equals(lastControlsSig)) {
             lastControlsSig = ctrlSig;
             controlsHolder.removeAllViews();
+            LinearLayout r = Ui.row(a);
+            controlsHolder.addView(r);
             if (showApplyButton) {
-                LinearLayout r = Ui.row(a);
-                controlsHolder.addView(r);
                 Ui.button(r, "Apply Changes", true, new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -289,6 +291,12 @@ final class HomeWifiPage {
                     }
                 });
             }
+            Ui.button(r, "Session Log", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showSessionLogDialog();
+                }
+            });
         }
 
         String emptySig = "offline";
@@ -461,6 +469,12 @@ final class HomeWifiPage {
                     runWifiAction("scan", minsArg, null, false);
                 }
             });
+            Ui.button(btnRow, "Session Log", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showSessionLogDialog();
+                }
+            });
 
             LinearLayout timerRow = Ui.row(a);
             controlsHolder.addView(timerRow);
@@ -504,7 +518,66 @@ final class HomeWifiPage {
                     runWifiAction("back", null, null, true);
                 }
             });
+            Ui.button(btnRow, "Session Log", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showSessionLogDialog();
+                }
+            });
         }
+    }
+
+    private void showSessionLogDialog() {
+        new Ui.Job<Hmgapid.Result>() {
+            @Override
+            Hmgapid.Result work() throws Exception {
+                return Hmgapid.call(8000, "wifi", "log");
+            }
+
+            @Override
+            void done(Hmgapid.Result r, Exception e) {
+                if (a.isFinishing()) return;
+                String content = e != null
+                        ? ("Could not load session log: " + Hmgapid.unreachable(e))
+                        : (r.output == null || r.output.trim().isEmpty()
+                                ? "(No parked Home Wi-Fi session events recorded yet.)"
+                                : r.output.trim());
+
+                final ScrollView scroll = new ScrollView(a);
+                int pad = Ui.dp(a, 16);
+                scroll.setPadding(pad, Ui.dp(a, 10), pad, Ui.dp(a, 10));
+                final TextView tv = new TextView(a);
+                tv.setTypeface(Typeface.MONOSPACE);
+                tv.setTextColor(Ui.TEXT);
+                Ui.size(tv, 13);
+                tv.setText(content);
+                scroll.addView(tv);
+                scroll.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        scroll.fullScroll(View.FOCUS_DOWN);
+                    }
+                });
+
+                new AlertDialog.Builder(a)
+                        .setTitle("Parked Home Wi-Fi Session Log")
+                        .setView(scroll)
+                        .setPositiveButton("Save to USB", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int which) {
+                                runWifiAction("log-usb", null, null, false);
+                            }
+                        })
+                        .setNeutralButton("Clear", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int which) {
+                                runWifiAction("log-clear", null, null, false);
+                            }
+                        })
+                        .setNegativeButton("Close", null)
+                        .show();
+            }
+        }.start(a);
     }
 
     private void renderSavedNetworks(JSONArray arr) {

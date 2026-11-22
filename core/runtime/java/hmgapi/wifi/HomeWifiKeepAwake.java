@@ -20,6 +20,9 @@ public final class HomeWifiKeepAwake {
     public static final long UNLIMITED_MS = -1L;
     public static final long UNPLUG_GRACE_MS = 60000L;
     public static final long PEER_FRESH_MS = 25000L;
+    public static final long HOME_ACQUIRE_TIMEOUT_MS = 120000L;    // 2 min when no saved Home Wi-Fi seen
+    public static final long HOME_CONNECTING_CAP_MS = 180000L;     // 3 min cap when saved SSID seen / associating
+    public static final long HOME_RECONNECT_TIMEOUT_MS = 180000L;  // 3 min reconnect window after mid-park drop
 
     public static final int MIN_12V_UNPLUGGED = 65;
     public static final int MIN_12V_PLUGGED_IDLE = 55;
@@ -75,6 +78,7 @@ public final class HomeWifiKeepAwake {
         public final boolean unlimited;
         public final boolean cutBy12v;
         public final boolean extendedByPeer;
+        public final boolean awayFromHome;
         public final String activeCode;
         public final int remainingSec; // -1 = unlimited, 0 = inactive/expired
         public final long expiresAtElapsedMs;
@@ -86,19 +90,20 @@ public final class HomeWifiKeepAwake {
                        boolean cutBy12v, boolean extendedByPeer, String activeCode,
                        int remainingSec, long expiresAtElapsedMs) {
             this(holdPower, shouldStayInClientMode, unlimited, cutBy12v, extendedByPeer,
-                    activeCode, remainingSec, expiresAtElapsedMs,
+                    false, activeCode, remainingSec, expiresAtElapsedMs,
                     holdPower && !extendedByPeer, unlimited && !extendedByPeer, expiresAtElapsedMs);
         }
 
         public Verdict(boolean holdPower, boolean shouldStayInClientMode, boolean unlimited,
-                       boolean cutBy12v, boolean extendedByPeer, String activeCode,
-                       int remainingSec, long expiresAtElapsedMs,
+                       boolean cutBy12v, boolean extendedByPeer, boolean awayFromHome,
+                       String activeCode, int remainingSec, long expiresAtElapsedMs,
                        boolean ownHoldPower, boolean ownUnlimited, long ownExpiresAtElapsedMs) {
             this.holdPower = holdPower;
             this.shouldStayInClientMode = shouldStayInClientMode;
             this.unlimited = unlimited;
             this.cutBy12v = cutBy12v;
             this.extendedByPeer = extendedByPeer;
+            this.awayFromHome = awayFromHome;
             this.activeCode = activeCode == null ? "off" : activeCode;
             this.remainingSec = remainingSec;
             this.expiresAtElapsedMs = expiresAtElapsedMs;
@@ -109,16 +114,24 @@ public final class HomeWifiKeepAwake {
     }
 
     private long parkedStartMs = -1L;
+    private long acquireWindowStartMs = -1L;
+    private long disconnectedSinceMs = -1L;
     private long unplugGraceUntilMs = 0L;
     private boolean wasPluggedIn = false;
+    private boolean everConnectedThisPark = false;
+    private boolean awayTimedOut = false;
     private int low12vSamples = 0;
     private boolean cutBy12v = false;
     private boolean timerExpiredThisPark = false;
 
     public void reset() {
         parkedStartMs = -1L;
+        acquireWindowStartMs = -1L;
+        disconnectedSinceMs = -1L;
         unplugGraceUntilMs = 0L;
         wasPluggedIn = false;
+        everConnectedThisPark = false;
+        awayTimedOut = false;
         low12vSamples = 0;
         cutBy12v = false;
         timerExpiredThisPark = false;
@@ -132,12 +145,27 @@ public final class HomeWifiKeepAwake {
         return timerExpiredThisPark;
     }
 
+    public boolean isAwayTimedOut() {
+        return awayTimedOut;
+    }
+
     public Verdict evaluate(WifiPlatform.VehicleSnapshot veh,
                             long nowElapsedMs,
                             String curBootId,
                             String rawUnpluggedCode,
                             String rawPluggedCode,
                             PeerLease peer) {
+        return evaluate(veh, nowElapsedMs, curBootId, rawUnpluggedCode, rawPluggedCode, peer, true, true);
+    }
+
+    public Verdict evaluate(WifiPlatform.VehicleSnapshot veh,
+                            long nowElapsedMs,
+                            String curBootId,
+                            String rawUnpluggedCode,
+                            String rawPluggedCode,
+                            PeerLease peer,
+                            boolean wifiConnected,
+                            boolean homeSeenOrAssociating) {
         if (veh == null || veh.isPowerOn()) {
             reset();
             return new Verdict(false, false, false, false, false, "off", 0, 0L);
@@ -145,15 +173,41 @@ public final class HomeWifiKeepAwake {
 
         if (parkedStartMs < 0L) {
             parkedStartMs = nowElapsedMs;
+            acquireWindowStartMs = nowElapsedMs;
             wasPluggedIn = veh.pluggedIn;
         } else if (wasPluggedIn && !veh.pluggedIn) {
             unplugGraceUntilMs = nowElapsedMs + UNPLUG_GRACE_MS;
             timerExpiredThisPark = false;
             wasPluggedIn = false;
         } else if (!wasPluggedIn && veh.pluggedIn) {
-            // Newly plugged in while parked: clear any prior unplugged timer expiration!
+            // Newly plugged in while parked: clear any prior unplugged timer expiration and
+            // grant a fresh 2-min home check if not yet connected (connects at home; sleeps at public EVSE).
             timerExpiredThisPark = false;
             wasPluggedIn = true;
+            if (!wifiConnected) {
+                acquireWindowStartMs = nowElapsedMs;
+                disconnectedSinceMs = -1L;
+                awayTimedOut = false;
+            }
+        }
+
+        // Home detection: require connecting to an allowed Home Wi-Fi SSID within 2m (3m if seen/associating),
+        // and allow up to 3m to reconnect if a previously established Home Wi-Fi link drops mid-park.
+        if (wifiConnected) {
+            everConnectedThisPark = true;
+            disconnectedSinceMs = -1L;
+            awayTimedOut = false;
+        } else if (everConnectedThisPark) {
+            if (disconnectedSinceMs < 0L) {
+                disconnectedSinceMs = nowElapsedMs;
+            } else if ((nowElapsedMs - disconnectedSinceMs) >= HOME_RECONNECT_TIMEOUT_MS) {
+                awayTimedOut = true;
+            }
+        } else {
+            long limitMs = homeSeenOrAssociating ? HOME_CONNECTING_CAP_MS : HOME_ACQUIRE_TIMEOUT_MS;
+            if (acquireWindowStartMs >= 0L && (nowElapsedMs - acquireWindowStartMs) >= limitMs) {
+                awayTimedOut = true;
+            }
         }
 
         // 12V Battery Guardian evaluation (2-sample debounce)
@@ -192,20 +246,24 @@ public final class HomeWifiKeepAwake {
         long ownDurMs = durationMsForCode(chosenCode, veh.pluggedIn);
 
         boolean ownConfigured = !"off".equals(chosenCode);
-        boolean ownUnlimited = (ownDurMs == UNLIMITED_MS);
+        boolean ownUnlimited = false;
         long ownExpiresAt = 0L;
         boolean ownActive = false;
 
-        if (ownUnlimited) {
-            ownActive = true;
-        } else if (ownDurMs > 0L) {
-            ownExpiresAt = Math.max(parkedStartMs + ownDurMs, unplugGraceUntilMs);
-            ownActive = nowElapsedMs < ownExpiresAt;
-        } else if (unplugGraceUntilMs > 0L && nowElapsedMs < unplugGraceUntilMs) {
-            ownExpiresAt = unplugGraceUntilMs;
-            ownActive = true;
+        if (!awayTimedOut) {
+            ownUnlimited = (ownDurMs == UNLIMITED_MS);
+            if (ownUnlimited) {
+                ownActive = true;
+            } else if (ownDurMs > 0L) {
+                ownExpiresAt = Math.max(parkedStartMs + ownDurMs, unplugGraceUntilMs);
+                ownActive = nowElapsedMs < ownExpiresAt;
+            } else if (unplugGraceUntilMs > 0L && nowElapsedMs < unplugGraceUntilMs) {
+                ownExpiresAt = unplugGraceUntilMs;
+                ownActive = true;
+            }
         }
 
+        // OpenLink's keep-awake lease always takes precedence when active!
         boolean peerActive = peer != null && peer.isFreshAndActive(curBootId, nowElapsedMs);
         boolean peerUnlimited = peerActive && peer.unlimited;
         long peerExpiresAt = (peerActive && !peerUnlimited) ? peer.expiresAtElapsedMs : 0L;
@@ -224,14 +282,14 @@ public final class HomeWifiKeepAwake {
             remSec = (int) ((effectiveExpiresAt - nowElapsedMs + 999L) / 1000L);
         }
 
-        if (ownConfigured && !effectiveHoldPower) {
+        if (ownConfigured && !effectiveHoldPower && !awayTimedOut) {
             timerExpiredThisPark = true;
         }
 
         // Stay in client Wi-Fi if:
-        //  - Effective keep-awake (own or OpenLink peer) is currently active, OR
-        //  - Own keep-awake is "off" (opportunistic Wi-Fi during the car's stock ~5 min ADM window)
-        boolean stayClient = effectiveHoldPower || (!ownConfigured && !timerExpiredThisPark);
+        //  - Effective keep-awake (own at-home keep-awake, or OpenLink peer precedence) is active, OR
+        //  - Own keep-awake is "off" during the initial <= 2m home-check window while MICOM is still in stock ADM
+        boolean stayClient = effectiveHoldPower || (!ownConfigured && !timerExpiredThisPark && !awayTimedOut);
         boolean extendedByPeer = !ownActive && peerActive;
 
         return new Verdict(
@@ -240,6 +298,7 @@ public final class HomeWifiKeepAwake {
                 effectiveUnlimited,
                 false,
                 extendedByPeer,
+                awayTimedOut,
                 chosenCode,
                 remSec,
                 effectiveExpiresAt,

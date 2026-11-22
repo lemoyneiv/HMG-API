@@ -49,6 +49,7 @@ public final class HomeWifiDaemon {
         store.importLegacyWpaSupplicantIfNeeded(new File(rootDir, "data/misc/wifi/wpa_supplicant.conf"));
 
         final AndroidWifiPlatform platform = new AndroidWifiPlatform(sysCtx, mainHandler);
+        platform.setFlightLog(store.flightLog());
         final HomeWifiController controller = new HomeWifiController(store, platform);
 
         final LocalServerSocket server = new LocalServerSocket(SOCKET_NAME);
@@ -262,6 +263,34 @@ public final class HomeWifiDaemon {
         if ("status".equals(verb)) {
             HomeWifiController offline = new HomeWifiController(store, new InertPlatform(store));
             System.out.println(offline.statusJson());
+            return 0;
+        }
+        if ("log".equals(verb)) {
+            String tail = store.flightLog().readOwnerTail(48 * 1024);
+            if (tail.trim().isEmpty()) {
+                System.out.println("(No parked Home Wi-Fi session events recorded yet.)");
+            } else {
+                System.out.print(tail);
+            }
+            return 0;
+        }
+        if ("log-usb".equals(verb)) {
+            try {
+                List<String> saved = store.flightLog().savePublicToUsb(System.currentTimeMillis() / 1000L);
+                if (saved.isEmpty()) {
+                    System.out.println("No USB stick detected. Insert a USB drive and try again.");
+                    return 1;
+                }
+                System.out.println("Saved scrubbed session log to " + saved.get(0));
+                return 0;
+            } catch (Exception e) {
+                System.out.println("Could not write to USB stick: " + e.getMessage());
+                return 1;
+            }
+        }
+        if ("log-clear".equals(verb)) {
+            store.flightLog().clear();
+            System.out.println("Cleared Home Wi-Fi session log.");
             return 0;
         }
         System.out.println("Home Wi-Fi service is still starting up. Try again in a few seconds.");

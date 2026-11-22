@@ -327,6 +327,25 @@ final class ProblemLog {
             s.append("  ").append(scrub(l.trim())).append('\n');
         }
         if (n == 0) s.append("kernel log: no HMG-API lines (the ring holds only the latest)\n");
+        File wifiPrev = new File(e.data, "public/wifi-session.log.prev");
+        File wifiCur = new File(e.data, "public/wifi-session.log");
+        if (wifiPrev.isFile() || wifiCur.isFile()) {
+            s.append("Home Wi-Fi parked session log:\n");
+            List<String> wlines = new ArrayList<String>();
+            for (File wf : new File[] { wifiPrev, wifiCur }) {
+                if (!wf.isFile()) continue;
+                try {
+                    for (String wl : Engine.read(wf).split("\n")) {
+                        if (!wl.trim().isEmpty()) wlines.add(wl);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            int start = Math.max(0, wlines.size() - 250);
+            for (int i = start; i < wlines.size(); i++) {
+                s.append("  ").append(scrub(wlines.get(i))).append('\n');
+            }
+        }
     }
 
     /** Android's own crash reports (dropbox), newest first, each cut to its header and stack trace */

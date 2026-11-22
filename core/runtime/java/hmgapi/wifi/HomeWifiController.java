@@ -25,6 +25,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     public static final long AP_DISABLE_FALLBACK_MS = 3500L;
     public static final long WIFI_ENABLE_POLL_MS = 400L;
     public static final long SCAN_INTERVAL_MS = 4000L;
+    public static final long AWAY_PEER_SCAN_INTERVAL_MS = 60000L;
     public static final long FAST_CONNECT_FALLBACK_MS = 6500L;
     public static final long ASSOC_WATCHDOG_MS = 5500L;
     public static final long ASSOC_SETTLE_MS = 400L;
@@ -101,12 +102,31 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private HomeWifiKeepAwake.Verdict lastKeepAwakeVerdict =
             new HomeWifiKeepAwake.Verdict(false, false, false, false, false, "off", 0, 0L);
     private boolean pendingApRestoreOnPowerOn = false;
+    private String lastLoggedVehicleSig = "";
+    private String lastLoggedVerdictSig = "";
+    private String lastLoggedScanSig = "";
+    private long lastHeartbeatMs = 0L;
 
     public HomeWifiController(HomeWifiStore store, WifiPlatform platform) {
         this.store = store;
         this.platform = platform;
         this.platform.setEventListener(this);
         this.liveScans = new ArrayList<HomeWifiStore.SeenNetwork>(store.loadSeenNetworks());
+    }
+
+    private String redactSsid(String ssid) {
+        return HomeWifiFlightLog.redactSsid(ssid, store.listProfiles());
+    }
+
+    private void recordFlight(String tag, String ownerDetail, String publicDetail, boolean doFsync) {
+        long wallSec = platform.wallEpochSec();
+        long nowEl = platform.elapsedRealtimeMs();
+        String curBoot = platform.bootId();
+        store.flightLog().recordEvent(wallSec, nowEl, curBoot, tag, ownerDetail, publicDetail, doFsync);
+        if (sessionActive && !lastVehicle.isPowerOn()) {
+            store.flightLog().markSessionActive(curBoot, wallSec, nowEl, phase, lastVehicle.power,
+                    tag + "(" + publicDetail + ")");
+        }
     }
 
     public synchronized void start() {
@@ -119,6 +139,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         if (sessionActive) {
             exitClientSession(reason, true);
         } else {
+            store.flightLog().clearSessionActive();
             platform.routeDown();
             store.clearLease();
             if (pendingApRestoreOnPowerOn) {
@@ -152,6 +173,9 @@ public final class HomeWifiController implements WifiPlatform.Events {
             bootChecked = true;
             String prevBoot = store.loadActiveBootId();
             String curBoot = platform.bootId();
+            long nowEl = platform.elapsedRealtimeMs();
+            long sleepGap = nowEl - platform.uptimeMillis();
+            store.flightLog().recordDaemonStart(curBoot, platform.wallEpochSec(), nowEl, sleepGap);
             store.clearLease();
             store.clearKeepAwakeLease();
             if (!prevBoot.isEmpty() && !prevBoot.equals(curBoot)) {
@@ -160,9 +184,28 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 platform.routeDown();
                 platform.restoreSoftAp(savedApMode);
                 store.clearActiveBootId();
+                String cleanMsg = "restoredSoftApMode=" + savedApMode;
+                recordFlight("REBOOT_AP_CLEANUP", cleanMsg, cleanMsg, true);
             }
         }
         tickVehicleAndHealth();
+    }
+
+    private boolean isHomeNetworkSeenOrAssociating() {
+        if (!sessionActive) return false;
+        if (isPollingDhcp || (!isFastConnecting && isConnectingToTarget)) {
+            return true;
+        }
+        for (HomeWifiStore.SeenNetwork sr : liveScans) {
+            if (sr == null || !isAllowedForHomeWifi(sr.ssid)) continue;
+            String low = sr.ssid.toLowerCase(Locale.US);
+            if (authFailedLower.contains(low) || pausedAutoLower.contains(low)) continue;
+            HomeWifiStore.Profile p = store.findProfile(sr.ssid);
+            if (p != null && p.useForHomeWifi) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public synchronized void tickVehicleAndHealth() {
@@ -173,7 +216,11 @@ public final class HomeWifiController implements WifiPlatform.Events {
         String curBoot = platform.bootId();
         long sleepGap = nowElapsed - platform.uptimeMillis();
         if (lastSleepGapMs != Long.MIN_VALUE && (sleepGap - lastSleepGapMs) >= 3000L) {
+            long deltaMs = sleepGap - lastSleepGapMs;
             platform.log("System resumed from QuickBoot suspend; refreshing vehicle & Wi-Fi state");
+            String strDetail = "gapDeltaMs=" + deltaMs + " totalGapMs=" + sleepGap
+                    + " power=" + veh.power + " sessionWasActive=" + sessionActive;
+            recordFlight("STR_RESUME", strDetail, strDetail, true);
             if (veh.isPowerOn()) {
                 powerOffSinceMs = -1L;
             }
@@ -184,15 +231,39 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
         lastSleepGapMs = sleepGap;
 
+        String vehSig = veh.power + "|" + veh.parked + "|" + veh.pluggedIn + "|" + veh.charging + "|" + veh.saver12v;
+        if (!veh.isPowerOn() || sessionActive) {
+            if (!vehSig.equals(lastLoggedVehicleSig)) {
+                lastLoggedVehicleSig = vehSig;
+                String vMsg = "power=" + (veh.power.isEmpty() ? "on" : veh.power)
+                        + " parked=" + veh.parked
+                        + " gearPark=" + veh.gearPark
+                        + " plugged=" + veh.pluggedIn
+                        + " charging=" + veh.charging
+                        + " soc12v=" + veh.bat12vSoc
+                        + " saver12v=" + veh.saver12v;
+                recordFlight("VEHICLE_STATE", vMsg, vMsg, true);
+            }
+        } else if (!lastLoggedVehicleSig.isEmpty()) {
+            lastLoggedVehicleSig = "";
+            lastLoggedVerdictSig = "";
+            String vMsg = "power=on plugged=" + veh.pluggedIn + " soc12v=" + veh.bat12vSoc;
+            recordFlight("VEHICLE_IG_ON", vMsg, vMsg, true);
+        }
+
         if (veh.isPowerOn()) {
             keepAwake.reset();
             lastKeepAwakeVerdict = new HomeWifiKeepAwake.Verdict(false, false, false, false, false, "off", 0, 0L);
             store.clearKeepAwakeLease();
+            if (store.flightLog().hasActiveMarker()) {
+                store.flightLog().clearSessionActive();
+            }
             if (pendingApRestoreOnPowerOn && !sessionActive && !manualActive) {
                 pendingApRestoreOnPowerOn = false;
                 platform.restoreSoftAp(savedApMode);
                 store.clearActiveBootId();
                 platform.log("Restored SoftAP mode " + savedApMode + " on power-on after parked sleep");
+                recordFlight("SOFTAP_RESTORED", "mode=" + savedApMode, "mode=" + savedApMode, true);
             }
         }
 
@@ -226,14 +297,39 @@ public final class HomeWifiController implements WifiPlatform.Events {
         if (!veh.isPowerOn() && offLong) {
             String ownUnplugged = hasHomeProfile ? store.getKeepAwakeUnplugged() : "off";
             String ownPlugged = hasHomeProfile ? store.getKeepAwakePlugged() : "off";
+            boolean wifiConnected = sessionActive && "connected".equals(phase);
+            boolean homeSeenOrAssoc = isHomeNetworkSeenOrAssociating();
             lastKeepAwakeVerdict = keepAwake.evaluate(
                     veh,
                     nowElapsed,
                     curBoot,
                     ownUnplugged,
                     ownPlugged,
-                    store.readPeerOpenLinkLease());
+                    store.readPeerOpenLinkLease(),
+                    wifiConnected,
+                    homeSeenOrAssoc);
             store.writeKeepAwakeLease(curBoot, lastKeepAwakeVerdict, veh, nowElapsed);
+            String verdictSig = lastKeepAwakeVerdict.shouldStayInClientMode + "|"
+                    + lastKeepAwakeVerdict.holdPower + "|"
+                    + lastKeepAwakeVerdict.unlimited + "|"
+                    + lastKeepAwakeVerdict.extendedByPeer + "|"
+                    + lastKeepAwakeVerdict.awayFromHome + "|"
+                    + lastKeepAwakeVerdict.cutBy12v + "|"
+                    + lastKeepAwakeVerdict.activeCode;
+            if (!verdictSig.equals(lastLoggedVerdictSig)) {
+                lastLoggedVerdictSig = verdictSig;
+                String kaMsg = "stayClient=" + lastKeepAwakeVerdict.shouldStayInClientMode
+                        + " holdPower=" + lastKeepAwakeVerdict.holdPower
+                        + " code=" + lastKeepAwakeVerdict.activeCode
+                        + " peer=" + lastKeepAwakeVerdict.extendedByPeer
+                        + " away=" + lastKeepAwakeVerdict.awayFromHome
+                        + " cut12v=" + lastKeepAwakeVerdict.cutBy12v
+                        + " remSec=" + lastKeepAwakeVerdict.remainingSec
+                        + " wifiUp=" + wifiConnected
+                        + " homeSeen=" + homeSeenOrAssoc
+                        + " soc12v=" + veh.bat12vSoc;
+                recordFlight("KEEPAWAKE_VERDICT", kaMsg, kaMsg, true);
+            }
         } else if (!veh.isPowerOn()) {
             lastKeepAwakeVerdict = new HomeWifiKeepAwake.Verdict(false, true, false, false, false, "off", 0, 0L);
         }
@@ -249,13 +345,33 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 pinnedSsid = null;
                 String endWhy = lastKeepAwakeVerdict.cutBy12v
                         ? "12V battery protection floor reached"
-                        : "Parked keep-awake timer ended";
+                        : (lastKeepAwakeVerdict.awayFromHome
+                                ? "No saved Home Wi-Fi connected (away from home)"
+                                : "Parked keep-awake timer ended");
                 exitClientSession(endWhy, false);
                 scheduleVehicleTick();
                 return;
             }
             platform.setSessionLocks(true, !veh.isPowerOn() && lastKeepAwakeVerdict.holdPower);
             maintainActiveSession();
+            if (!veh.isPowerOn() && (nowElapsed - lastHeartbeatMs) >= HomeWifiFlightLog.HEARTBEAT_INTERVAL_MS) {
+                lastHeartbeatMs = nowElapsed;
+                String commonTail = " rssi=" + connectedRssi
+                        + " power=" + (veh.power.isEmpty() ? "off" : veh.power)
+                        + " plugged=" + veh.pluggedIn
+                        + " charging=" + veh.charging
+                        + " soc12v=" + veh.bat12vSoc
+                        + " holdPower=" + lastKeepAwakeVerdict.holdPower
+                        + " peer=" + lastKeepAwakeVerdict.extendedByPeer
+                        + " remSec=" + lastKeepAwakeVerdict.remainingSec;
+                String ownHb = "phase=" + phase
+                        + " ssid=" + (connectedSsid.isEmpty() ? "-" : ("\"" + connectedSsid + "\""))
+                        + commonTail;
+                String pubHb = "phase=" + phase
+                        + " net=" + redactSsid(connectedSsid)
+                        + commonTail;
+                recordFlight("HEARTBEAT", ownHb, pubHb, true);
+            }
             scheduleVehicleTick();
             return;
         }
@@ -290,6 +406,9 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     if (lastKeepAwakeVerdict.cutBy12v) {
                         headline = "Paused (12V battery protection)";
                         detail = "Home Wi-Fi disconnected early to protect the 12V battery.";
+                    } else if (lastKeepAwakeVerdict.awayFromHome) {
+                        headline = "Standby (Away from Home Wi-Fi)";
+                        detail = "No saved Home Wi-Fi network connected within 2 minutes of parking; allowing the head unit to power off normally.";
                     } else {
                         headline = "Parked keep-awake ended";
                         detail = "Home Wi-Fi completed its parked keep-awake window and is ready to sleep.";
@@ -352,6 +471,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
         handshakeDropCount = 0;
         scanCount = 0;
         enablePollCount = 0;
+        lastLoggedScanSig = "";
+        lastHeartbeatMs = platform.elapsedRealtimeMs();
         pausedAutoLower.clear();
         cancelAllTimers();
 
@@ -364,6 +485,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
             store.saveApMode(savedApMode);
             store.saveActiveBootId(platform.bootId());
             platform.log("Starting Home Wi-Fi (" + reason + "; prior SoftAP=" + (apOn ? ("mode " + savedApMode) : "off") + ")");
+            String startMsg = "reason=\"" + reason + "\" priorSoftAp=" + (apOn ? ("mode" + savedApMode) : "off")
+                    + " power=" + (lastVehicle.power.isEmpty() ? "on" : lastVehicle.power)
+                    + " plugged=" + lastVehicle.pluggedIn;
+            recordFlight("SESSION_START", startMsg, startMsg, true);
             if (apOn) {
                 phase = "disabling_ap";
                 headline = "Preparing Wi-Fi…";
@@ -385,6 +510,9 @@ public final class HomeWifiController implements WifiPlatform.Events {
             pendingApRestoreOnPowerOn = false;
             store.saveActiveBootId(platform.bootId());
             platform.log("Resuming Home Wi-Fi (" + reason + ")");
+            String resumeMsg = "reason=\"" + reason + "\" resumedFromDeferredAp=true"
+                    + " power=" + (lastVehicle.power.isEmpty() ? "on" : lastVehicle.power);
+            recordFlight("SESSION_START", resumeMsg, resumeMsg, true);
         }
         enableStationHardware();
     }
@@ -408,9 +536,16 @@ public final class HomeWifiController implements WifiPlatform.Events {
         connectedRssi = 0;
         connectedFreq = 0;
 
+        store.flightLog().clearSessionActive();
         platform.routeDown();
         store.clearLease();
         platform.setSessionLocks(false, false);
+
+        String ownEnd = "reason=\"" + reason + "\" restoreApNow=" + restoreApNow
+                + " wasConnected=" + (prevConnected.isEmpty() ? "none" : ("\"" + prevConnected + "\""));
+        String pubEnd = "reason=\"" + reason + "\" restoreApNow=" + restoreApNow
+                + " wasConnected=" + redactSsid(prevConnected);
+        recordFlight("SESSION_END", ownEnd, pubEnd, true);
 
         if (restoreApNow) {
             pendingApRestoreOnPowerOn = false;
@@ -429,10 +564,16 @@ public final class HomeWifiController implements WifiPlatform.Events {
             platform.log("Stopped Home Wi-Fi for parked sleep (" + reason
                     + (prevConnected.isEmpty() ? "" : "; was connected") + "); SoftAP restore deferred to power-on");
             phase = "sleep";
-            headline = lastKeepAwakeVerdict.cutBy12v ? "Paused (12V battery protection)" : "Parked keep-awake ended";
-            detail = lastKeepAwakeVerdict.cutBy12v
-                    ? "Home Wi-Fi disconnected early to protect the 12V battery."
-                    : "Home Wi-Fi completed its parked keep-awake window and is ready to sleep.";
+            if (lastKeepAwakeVerdict.cutBy12v) {
+                headline = "Paused (12V battery protection)";
+                detail = "Home Wi-Fi disconnected early to protect the 12V battery.";
+            } else if (lastKeepAwakeVerdict.awayFromHome) {
+                headline = "Standby (Away from Home Wi-Fi)";
+                detail = "No saved Home Wi-Fi network connected within 2 minutes of parking; allowing the head unit to power off normally.";
+            } else {
+                headline = "Parked keep-awake ended";
+                detail = "Home Wi-Fi completed its parked keep-awake window and is ready to sleep.";
+            }
         }
         store.writePublicStatus("waiting", 0, 0);
     }
@@ -481,6 +622,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
         if (!sessionActive) return;
 
         syncProfilesAndEnforceExclusions();
+        String readyMsg = "savedProfiles=" + store.listProfiles().size();
+        recordFlight("WIFI_READY", readyMsg, readyMsg, false);
 
         // Check if already associated to an allowed Home Wi-Fi network
         WifiPlatform.ConnectionSnapshot snap = platform.getConnectionSnapshot();
@@ -667,6 +810,11 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 ? "Associating with access point (" + sr.rssiDbm + " dBm, " + WifiSecurity.bandLabel(sr.freqMhz) + ")…"
                 : "Looking for access point and associating…";
         store.writePublicStatus("searching", 0, 0);
+        String scanPart = sr != null ? (" rssi=" + sr.rssiDbm + " freq=" + sr.freqMhz) : "";
+        recordFlight("CONNECT_START",
+                "ssid=\"" + clean + "\" fast=" + fastPath + scanPart,
+                "target=" + redactSsid(clean) + " fast=" + fastPath + scanPart,
+                true);
 
         scheduleAssocWatchdog(ASSOC_WATCHDOG_MS);
         if (fastPath) {
@@ -738,6 +886,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
             }
             lastErrorSsid = failed;
             lastErrorReason = "Timed out trying to associate with \"" + failed + "\" (router out of range or unresponsive).";
+            recordFlight("ASSOC_TIMEOUT",
+                    "ssid=\"" + failed + "\" supState=" + cur.supState,
+                    "target=" + redactSsid(failed) + " supState=" + cur.supState,
+                    true);
             startScanLoop();
             String alt = chooseBestScannedCandidate();
             if (alt != null) {
@@ -750,6 +902,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         assocRetryCount++;
         platform.log("Nudging stalled association (" + assocRetryCount + "/" + MAX_ASSOC_RETRIES + ", state=" + cur.supState + ")");
+        recordFlight("ASSOC_RETRY",
+                "attempt=" + assocRetryCount + "/" + MAX_ASSOC_RETRIES + " supState=" + cur.supState,
+                "attempt=" + assocRetryCount + "/" + MAX_ASSOC_RETRIES + " supState=" + cur.supState,
+                false);
         detail = "Retrying Wi-Fi association (" + assocRetryCount + "/" + MAX_ASSOC_RETRIES + ")…";
         if (cur.supState == WifiPlatform.SupState.ASSOCIATING
                 || cur.supState == WifiPlatform.SupState.ASSOCIATED
@@ -778,7 +934,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
     }
 
     private void startScanLoop() {
-        platform.scheduleDelayed(TAG_SCAN, SCAN_INTERVAL_MS, new Runnable() {
+        long intervalMs = (!lastVehicle.isPowerOn() && lastKeepAwakeVerdict.awayFromHome)
+                ? AWAY_PEER_SCAN_INTERVAL_MS
+                : SCAN_INTERVAL_MS;
+        platform.scheduleDelayed(TAG_SCAN, intervalMs, new Runnable() {
             @Override
             public void run() {
                 synchronized (HomeWifiController.this) {
@@ -857,6 +1016,18 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         // Re-enforce dashcam/excluded network disablement in case system Wi-Fi discovered anything
         syncProfilesAndEnforceExclusions();
+
+        int allowedSeen = 0;
+        for (HomeWifiStore.SeenNetwork s : liveScans) {
+            HomeWifiStore.Profile p = store.findProfile(s.ssid);
+            if (p != null && p.useForHomeWifi) allowedSeen++;
+        }
+        String scanSig = liveScans.size() + "|" + allowedSeen;
+        if (!scanSig.equals(lastLoggedScanSig)) {
+            lastLoggedScanSig = scanSig;
+            String scanMsg = "nearby=" + liveScans.size() + " homeInRange=" + allowedSeen;
+            recordFlight("SCAN_RESULTS", scanMsg, scanMsg, false);
+        }
 
         if (isConnectingToTarget) {
             if (isFastConnecting && targetSsid != null) {
@@ -950,7 +1121,12 @@ public final class HomeWifiController implements WifiPlatform.Events {
             }
             case DISCONNECTED:
                 if ("connected".equals(phase)) {
+                    String lostSsid = connectedSsid;
                     platform.log("Home Wi-Fi link lost; tearing down routes and searching");
+                    recordFlight("LINK_LOST",
+                            "ssid=\"" + lostSsid + "\" via=supplicant",
+                            "target=" + redactSsid(lostSsid) + " via=supplicant",
+                            true);
                     platform.routeDown();
                     store.clearLease();
                     connectedSsid = "";
@@ -1006,6 +1182,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
         lastErrorSsid = failed;
         lastErrorReason = "The Wi-Fi password for \"" + failed + "\" was rejected. Tap \"Password\" on that network below to update it.";
         platform.log("WPA authentication rejected for Home Wi-Fi profile");
+        recordFlight("AUTH_REJECTED",
+                "ssid=\"" + failed + "\" authErrs=" + authErrorCount + " hsDrops=" + handshakeDropCount,
+                "target=" + redactSsid(failed) + " authErrs=" + authErrorCount + " hsDrops=" + handshakeDropCount,
+                true);
 
         startScanLoop();
         platform.startScan();
@@ -1082,9 +1262,32 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 store.recordConnectedNow(ssid, platform.wallEpochSec());
                 store.saveLease(gw, d1, d2, myIp);
                 phase = "connected";
+                if (!lastVehicle.isPowerOn() && evaluateOffLong(lastVehicle, platform.elapsedRealtimeMs())) {
+                    long nowEl = platform.elapsedRealtimeMs();
+                    String curBoot = platform.bootId();
+                    lastKeepAwakeVerdict = keepAwake.evaluate(
+                            lastVehicle,
+                            nowEl,
+                            curBoot,
+                            store.getKeepAwakeUnplugged(),
+                            store.getKeepAwakePlugged(),
+                            store.readPeerOpenLinkLease(),
+                            true,
+                            true);
+                    store.writeKeepAwakeLease(curBoot, lastKeepAwakeVerdict, lastVehicle, nowEl);
+                    platform.setSessionLocks(true, lastKeepAwakeVerdict.holdPower);
+                }
                 headline = "Connected to " + ssid;
                 detail = buildConnectedDetail();
                 store.writePublicStatus("up", connectedRssi, connectedFreq);
+                String upTail = " rssi=" + connectedRssi + " freq=" + connectedFreq
+                        + " holdPower=" + lastKeepAwakeVerdict.holdPower
+                        + " remSec=" + lastKeepAwakeVerdict.remainingSec;
+                recordFlight("DHCP_UP",
+                        "ssid=\"" + ssid + "\" ip=" + myIp + " gw=" + gw + upTail,
+                        "target=" + redactSsid(ssid) + " ip=" + HomeWifiFlightLog.redactIp(myIp)
+                                + " gw=" + HomeWifiFlightLog.redactIp(gw) + upTail,
+                        true);
                 platform.log("Home Wi-Fi connected (" + myIp + ", " + connectedRssi + " dBm, "
                         + connectedFreq + " MHz); split routing active on table 95");
                 return;
@@ -1100,6 +1303,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
             lastErrorSsid = ssid;
             lastErrorReason = "DHCP timed out on \"" + ssid + "\". Retrying…";
             platform.log("DHCP timeout on Home Wi-Fi; triggering reassociate");
+            recordFlight("DHCP_TIMEOUT",
+                    "ssid=\"" + ssid + "\"",
+                    "target=" + redactSsid(ssid),
+                    true);
             platform.disconnect();
             platform.reassociate();
             startScanLoop();
@@ -1128,7 +1335,12 @@ public final class HomeWifiController implements WifiPlatform.Events {
             WifiPlatform.ConnectionSnapshot snap = platform.getConnectionSnapshot();
             if (snap.supState != WifiPlatform.SupState.COMPLETED
                     || (!WifiSecurity.isPlaceholderSsid(snap.ssid) && !snap.ssid.equalsIgnoreCase(connectedSsid))) {
+                String lostSsid = connectedSsid;
                 platform.log("Home Wi-Fi connection dropped; returning to scan");
+                recordFlight("LINK_LOST",
+                        "ssid=\"" + lostSsid + "\" via=health sup=" + snap.supState,
+                        "target=" + redactSsid(lostSsid) + " via=health sup=" + snap.supState,
+                        true);
                 platform.routeDown();
                 store.clearLease();
                 connectedSsid = "";
@@ -1214,11 +1426,37 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
     public synchronized CmdResult handleCommand(List<String> args) {
         if (args == null || args.isEmpty()) {
-            return new CmdResult(2, "usage: wifi status | scan [minutes] | saved | seen | join <ssid> [key] | connect <ssid> [key] | use <ssid> on|off | keepawake <unplugged> <plugged> | forget <ssid> | now [minutes] | back\n");
+            return new CmdResult(2, "usage: wifi status | scan [minutes] | saved | seen | join <ssid> [key] | connect <ssid> [key] | use <ssid> on|off | keepawake <unplugged> <plugged> | forget <ssid> | now [minutes] | back | log | log-usb | log-clear\n");
         }
         String verb = args.get(0);
         if ("status".equals(verb)) {
             return new CmdResult(0, statusJson() + "\n");
+        }
+        if ("log".equals(verb)) {
+            String tail = store.flightLog().readOwnerTail(48 * 1024);
+            if (tail.trim().isEmpty()) {
+                return new CmdResult(0, "(No parked Home Wi-Fi session events recorded yet.)\n");
+            }
+            return new CmdResult(0, tail.endsWith("\n") ? tail : (tail + "\n"));
+        }
+        if ("log-usb".equals(verb)) {
+            try {
+                List<String> saved = store.flightLog().savePublicToUsb(platform.wallEpochSec());
+                if (saved.isEmpty()) {
+                    return new CmdResult(1, "No USB stick detected. Insert a USB drive and try again.\n");
+                }
+                return new CmdResult(0, "Saved scrubbed session log to " + saved.get(0) + "\n");
+            } catch (IOException e) {
+                return new CmdResult(1, "Could not save session log to USB: " + e.getMessage() + "\n");
+            }
+        }
+        if ("log-clear".equals(verb)) {
+            store.flightLog().clear();
+            if (sessionActive && !lastVehicle.isPowerOn()) {
+                store.flightLog().markSessionActive(platform.bootId(), platform.wallEpochSec(),
+                        platform.elapsedRealtimeMs(), phase, lastVehicle.power, "LOG_CLEARED");
+            }
+            return new CmdResult(0, "Cleared Home Wi-Fi session log.\n");
         }
         if ("saved".equals(verb)) {
             StringBuilder sb = new StringBuilder();
@@ -1517,6 +1755,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         root.put("keepAwakeUnlimited", Boolean.valueOf(lastKeepAwakeVerdict.unlimited));
         root.put("keepAwakeRemainingSec", Integer.valueOf(lastKeepAwakeVerdict.remainingSec));
         root.put("keepAwakeExtendedByOpenLink", Boolean.valueOf(lastKeepAwakeVerdict.extendedByPeer));
+        root.put("keepAwakeAwayFromHome", Boolean.valueOf(lastKeepAwakeVerdict.awayFromHome));
         root.put("keepAwakeCutBy12v", Boolean.valueOf(lastKeepAwakeVerdict.cutBy12v));
         root.put("connectedSsid", connectedSsid);
         root.put("targetSsid", targetSsid == null ? "" : targetSsid);

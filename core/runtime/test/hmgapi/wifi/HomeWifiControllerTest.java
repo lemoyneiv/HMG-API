@@ -47,6 +47,8 @@ public final class HomeWifiControllerTest {
         testAutoParked30sTimerShiftOutAndRebootRestore();
         testParkedKeepAwakeUnpluggedAndPluggedIn();
         testKeepAwake12vGuardianAndPeerOpenLink();
+        testAwayFromHomeAutoSleepAndOpenLinkPrecedence();
+        testFlightLogPowerCutAndScrubbing();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -497,6 +499,226 @@ public final class HomeWifiControllerTest {
             Map<String, Object> stCut = Json.object(ctl.statusJson());
             check("12V cutoff flagged", Boolean.TRUE, stCut.get("keepAwakeCutBy12v"));
             checkTrue("Power & Wi-Fi released on 12V cutoff", !plat.holdParkedPower && !(Boolean) stCut.get("active"));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testAwayFromHomeAutoSleepAndOpenLinkPrecedence() throws Exception {
+        File root = Files.createTempDirectory("hw-away-home").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("MyHomeWiFi", "home-secret-123", true, "[WPA2-PSK-CCMP][ESS]", true);
+            // User configured 2h unplugged & "While plugged in" (default) when plugged in — NO OpenLink installed!
+            store.setKeepAwakePolicy("2h", "plugged");
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.nowMs = 10000L;
+            // Nearby networks at grocery store / public charger do NOT include MyHomeWiFi
+            plat.scanResults = Arrays.asList(
+                    new HomeWifiStore.SeenNetwork("CoffeeShop_Guest", "11:22:33:44:55:01", 2412, -62, "[ESS]"),
+                    new HomeWifiStore.SeenNetwork("Store_POS", "11:22:33:44:55:02", 5180, -70, "[WPA2-PSK-CCMP][ESS]"));
+
+            // 1. Park UNPLUGGED away from home (no OpenLink)
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 88, false);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            ctl.onScanResultsAvailable();
+            checkTrue("Initially searches and holds power during 2m home-check window",
+                    plat.holdParkedPower && plat.holdWifiLock);
+
+            // At +7s: fast-connect fallback switches into normal 4s scanning
+            plat.nowMs = 10000L + 7000L;
+            plat.fireTimer(HomeWifiController.TAG_FAST_FALLBACK);
+
+            // At +90s: still inside 2-minute home-detection window
+            plat.nowMs = 10000L + 90000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Still searching at +90s", plat.holdParkedPower && "scanning".equals(Json.object(ctl.statusJson()).get("phase")));
+
+            // At +2m + 1s (well before the 2h home keep-awake!): no saved Home Wi-Fi connected -> powers off!
+            plat.nowMs = 10000L + 121000L;
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> stAway = Json.object(ctl.statusJson());
+            check("Away from home transitions to sleep at 2m", "sleep", stAway.get("phase"));
+            check("keepAwakeAwayFromHome flagged", Boolean.TRUE, stAway.get("keepAwakeAwayFromHome"));
+            checkTrue("Releases parked power & WifiLock away from home", !plat.holdParkedPower && !plat.holdWifiLock);
+            checkTrue("Client Wi-Fi stopped without turning SoftAP back on",
+                    plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED && !plat.softApActive);
+
+            // 2. Plug into a PUBLIC EV CHARGER away from home (keepAwakePlugged="plugged", no OpenLink):
+            //    gets one 2-minute check, sees no Home Wi-Fi, and goes right back to sleep instead of staying awake all night!
+            plat.nowMs += 10000L;
+            long plugStart = plat.nowMs;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, true, true, 90, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Plug-in triggers fresh 2m home check", plat.holdParkedPower);
+
+            plat.nowMs = plugStart + 121000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Public EV charger away from home sleeps after 2m instead of staying awake forever",
+                    !plat.holdParkedPower && "sleep".equals(Json.object(ctl.statusJson()).get("phase")));
+
+            // 3. OpenLink precedence: drive & park away from home WITH an active OpenLink 30m lease ->
+            //    stays awake for OpenLink's full 30m even after Home Wi-Fi's 2m home-check times out!
+            plat.nowMs += 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 90, false);
+            ctl.tickVehicleAndHealth(); // IG ON resets keep-awake
+
+            plat.nowMs += 10000L;
+            long olStart = plat.nowMs;
+            long olExp = olStart + 30L * 60000L;
+            File peerFile = new File(root, "data/hmgapi/public/openlink-keepawake.json");
+            peerFile.getParentFile().mkdirs();
+            Files.write(peerFile.toPath(),
+                    ("{\"bootId\":\"boot-1\",\"active\":true,\"unlimited\":false,\"cutBy12vFloor\":false,"
+                            + "\"expiresAtElapsedMs\":" + olExp + ",\"remainingSec\":1800,\"updatedAtElapsedMs\":" + olStart + "}\n")
+                            .getBytes("UTF-8"));
+
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 87, false);
+            ctl.tickVehicleAndHealth();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+
+            // At +10 minutes away from home: Home Wi-Fi's own demand is false, but OpenLink lease keeps power held!
+            plat.nowMs = olStart + 10L * 60000L;
+            Files.write(peerFile.toPath(),
+                    ("{\"bootId\":\"boot-1\",\"active\":true,\"unlimited\":false,\"cutBy12vFloor\":false,"
+                            + "\"expiresAtElapsedMs\":" + olExp + ",\"remainingSec\":1200,\"updatedAtElapsedMs\":" + plat.nowMs + "}\n")
+                            .getBytes("UTF-8"));
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> ownKa = Json.object(HomeWifiStore.readText(new File(root, "data/hmgapi/public/keepawake.json")));
+            check("Home Wi-Fi's own published lease is inactive away from home", Boolean.FALSE, ownKa.get("active"));
+            checkTrue("OpenLink lease takes precedence and holds power", plat.holdParkedPower);
+
+            // 4. Mid-session router power loss at home: connects at home, then drops for > 3m without OpenLink -> sleeps!
+            peerFile.delete();
+            plat.nowMs += 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 90, false);
+            ctl.tickVehicleAndHealth();
+
+            plat.nowMs += 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, true, false, 88, false);
+            ctl.tickVehicleAndHealth();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            int ip = ipToInt(192, 168, 1, 77);
+            int gw = ipToInt(192, 168, 1, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "MyHomeWiFi", "aa:bb:cc:dd:ee:99",
+                    -55, 5180, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+            check("Connected at home while plugged in", "connected", Json.object(ctl.statusJson()).get("phase"));
+
+            // 1 hour later, home router loses power -> Wi-Fi drops
+            plat.nowMs += 3600L * 1000L;
+            long dropMs = plat.nowMs;
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.DISCONNECTED, -1, "", "", 0, 0, 0, 0, 0, 0, 0, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.DISCONNECTED, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Keeps power during 3m reconnect grace after drop", plat.holdParkedPower);
+
+            // Still down after 3m + 1s -> releases power so car can sleep!
+            plat.nowMs = dropMs + 181000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Powers off after 3m continuous Home Wi-Fi loss",
+                    !plat.holdParkedPower && "sleep".equals(Json.object(ctl.statusJson()).get("phase")));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testFlightLogPowerCutAndScrubbing() throws Exception {
+        File root = Files.createTempDirectory("hmg-wifi-flightlog").toFile();
+        try {
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.bootId = "44e9b2a1-1122-3344-5566-778899aabbcc";
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("SecretGarageNet", "SuperSecretKey99!", true, "[WPA2-PSK-CCMP][ESS]", true);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+
+            // Park car & connect to SecretGarageNet
+            plat.nowMs = 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 88, false);
+            ctl.tickVehicleAndHealth();
+            plat.listener.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            plat.scanResults = Arrays.asList(
+                    new HomeWifiStore.SeenNetwork("SecretGarageNet", "aa:bb:cc:dd:ee:ff", 5220, -52, "[WPA2-PSK-CCMP][ESS]")
+            );
+            plat.listener.onScanResultsAvailable();
+            int ip = ipToInt(192, 168, 50, 77);
+            int gw = ipToInt(192, 168, 50, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "SecretGarageNet", "aa:bb:cc:dd:ee:ff",
+                    -52, 5220, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            plat.listener.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+
+            // Advance +16s while parked so a 15s HEARTBEAT is persisted
+            plat.nowMs = 26500L;
+            ctl.tickVehicleAndHealth();
+
+            checkTrue("Active session marker exists during parked session", store.flightLog().hasActiveMarker());
+
+            HomeWifiController.CmdResult logRes = ctl.handleCommand(Arrays.asList("log"));
+            check("wifi log command succeeds", Integer.valueOf(0), Integer.valueOf(logRes.code));
+            checkTrue("Owner log contains SSID for in-car UI", logRes.output.contains("SecretGarageNet"));
+            checkTrue("Owner log never contains Wi-Fi PSK", !logRes.output.contains("SuperSecretKey99!"));
+            checkTrue("Owner log records SESSION_START, DHCP_UP, and HEARTBEAT",
+                    logRes.output.contains("SESSION_START")
+                            && logRes.output.contains("DHCP_UP")
+                            && logRes.output.contains("HEARTBEAT"));
+
+            String pubLog = store.flightLog().readPublicTail(65536);
+            checkTrue("Public log never contains SSID", !pubLog.contains("SecretGarageNet"));
+            checkTrue("Public log never contains PSK", !pubLog.contains("SuperSecretKey99!"));
+            checkTrue("Public log never contains raw boot UUID", !pubLog.contains("44e9b2a1-1122"));
+            checkTrue("Public log never contains full client IP", !pubLog.contains("192.168.50.77"));
+            checkTrue("Public log redacts SSID to saved#1 and IP to .x",
+                    pubLog.contains("saved#1") && pubLog.contains("192.168.50.x"));
+
+            // USB export: returns error when no USB stick exists, succeeds when USB stick is mounted
+            HomeWifiController.CmdResult noUsb = ctl.handleCommand(Arrays.asList("log-usb"));
+            check("wifi log-usb returns 1 when no USB stick is mounted", Integer.valueOf(1), Integer.valueOf(noUsb.code));
+
+            File usb0 = new File(root, "storage/usb0");
+            usb0.mkdirs();
+            HomeWifiController.CmdResult okUsb = ctl.handleCommand(Arrays.asList("log-usb"));
+            check("wifi log-usb succeeds with USB stick present", Integer.valueOf(0), Integer.valueOf(okUsb.code));
+            File[] exported = new File(usb0, "HMG-API reports").listFiles();
+            checkTrue("USB export file written", exported != null && exported.length == 1);
+            String usbContent = HomeWifiStore.readText(exported[0]);
+            checkTrue("USB exported log is scrubbed of SSID and PSK",
+                    !usbContent.contains("SecretGarageNet")
+                            && !usbContent.contains("SuperSecretKey99!")
+                            && usbContent.contains("saved#1"));
+
+            // Simulate abrupt MICOM 12V power cut at +2m (no clean exitClientSession / shutdown!)
+            FakeWifiPlatform nextBootPlat = new FakeWifiPlatform();
+            nextBootPlat.bootId = "99f0c3d2-8877-6655-4433-221100ffeedd";
+            nextBootPlat.nowMs = 4500L;
+            nextBootPlat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true);
+            HomeWifiStore nextStore = new HomeWifiStore(root);
+            HomeWifiController nextCtl = new HomeWifiController(nextStore, nextBootPlat);
+            nextCtl.start();
+
+            checkTrue("Active marker cleared after cold-boot recovery", !nextStore.flightLog().hasActiveMarker());
+            String postCutPub = nextStore.flightLog().readPublicTail(65536);
+            checkTrue("Cold-boot power cut detected and logged to public journal",
+                    postCutPub.contains("UNEXPECTED_POWER_CUT") && postCutPub.contains("outcome=COLD_BOOT_CUT"));
+
+            // Simulate QuickBoot STR suspend gap
+            nextBootPlat.nowMs = 150000L;
+            nextBootPlat.suspendOffsetMs = 120000L;
+            nextCtl.tickVehicleAndHealth();
+            String postStrPub = nextStore.flightLog().readPublicTail(65536);
+            checkTrue("QuickBoot STR suspend gap logged",
+                    postStrPub.contains("STR_RESUME") && postStrPub.contains("gapDeltaMs=120000"));
+
+            // Clear command wipes logs cleanly
+            HomeWifiController.CmdResult clr = nextCtl.handleCommand(Arrays.asList("log-clear"));
+            check("wifi log-clear succeeds", Integer.valueOf(0), Integer.valueOf(clr.code));
+            check("Public log empty after clear", "", nextStore.flightLog().readPublicTail(65536));
         } finally {
             deleteRec(root);
         }

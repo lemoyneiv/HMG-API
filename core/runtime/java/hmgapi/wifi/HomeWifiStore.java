@@ -69,6 +69,7 @@ public final class HomeWifiStore {
     private final File seenFile;
     private final File apModeFile;
     private final File modeBootFile;
+    private final HomeWifiFlightLog flightLog;
     private final Map<String, Profile> profilesByLower = new LinkedHashMap<String, Profile>();
     private String keepAwakeUnplugged = HomeWifiKeepAwake.DEFAULT_UNPLUGGED;
     private String keepAwakePlugged = HomeWifiKeepAwake.DEFAULT_PLUGGED;
@@ -85,10 +86,13 @@ public final class HomeWifiStore {
         this.seenFile = new File(wifiDir, "seen");
         this.apModeFile = new File(wifiDir, "apmode");
         this.modeBootFile = new File(wifiDir, "mode");
+        this.flightLog = new HomeWifiFlightLog(base);
         loadProfiles();
     }
 
     public File wifiDir() { return wifiDir; }
+
+    public HomeWifiFlightLog flightLog() { return flightLog; }
 
     public synchronized String getKeepAwakeUnplugged() {
         return keepAwakeUnplugged;
