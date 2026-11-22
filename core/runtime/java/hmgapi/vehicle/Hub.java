@@ -543,7 +543,6 @@ public final class Hub {
         if (conn > 0 && conn < 0x0f) return "1";
         int pd = optHscanInt(hs, "getCF_OBC_PD_Stat");
         if (pd == 1 || pd == 2) return "1";
-        if (optHscanBool(hs, "isConnectExternalEquipment")) return "1";
         return (chg == 0 || conn == 0 || pd == 0) ? "0" : null;
     }
 

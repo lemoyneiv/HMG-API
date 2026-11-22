@@ -49,6 +49,7 @@ public final class HomeWifiControllerTest {
         testKeepAwake12vGuardianAndPeerOpenLink();
         testAwayFromHomeAutoSleepAndOpenLinkPrecedence();
         testFlightLogPowerCutAndScrubbing();
+        testAdmPreLatchDoorOpenAndSoftApHijackReclaim();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -719,6 +720,70 @@ public final class HomeWifiControllerTest {
             HomeWifiController.CmdResult clr = nextCtl.handleCommand(Arrays.asList("log-clear"));
             check("wifi log-clear succeeds", Integer.valueOf(0), Integer.valueOf(clr.code));
             check("Public log empty after clear", "", nextStore.flightLog().readPublicTail(65536));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testAdmPreLatchDoorOpenAndSoftApHijackReclaim() throws Exception {
+        File root = Files.createTempDirectory("hw-adm-hijack").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("Garage5G", "garage-password", true, "[WPA2-PSK-CCMP][ESS]", true);
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.nowMs = 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 95, false, 1);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+
+            // 1. Driver presses Power OFF (power="adm", parked=false, doorsClosed=1 while still seated):
+            //    PwrKeep(1) MUST pre-latch immediately so MICOM stays in ADM (2) instead of DELAY_MODE (6),
+            //    while keeping Wireless Projection SoftAP & RAP untouched!
+            plat.nowMs = 12000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", false, true, false, false, 95, false, 1);
+            ctl.onVehicleSignalChanged();
+            checkTrue("ADM pre-latches holdParkedPower immediately before door open", plat.holdParkedPower);
+            checkTrue("ADM keeps holdWifiLock false while driver seated", !plat.holdWifiLock);
+            checkTrue("ADM keeps Projection SoftAP untouched while seated", plat.softApActive);
+
+            // 2. Driver opens door 5s later (doorsClosed=0, parked still false before door closes):
+            //    Session starts immediately without waiting 15s for door close or 30s timeout!
+            plat.nowMs = 17000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", false, true, false, false, 95, false, 0);
+            ctl.onVehicleSignalChanged();
+            checkTrue("Opening door in Park immediately disables Projection SoftAP", !plat.softApActive);
+            checkTrue("Opening door holds both WifiLock and ParkedPower", plat.holdWifiLock && plat.holdParkedPower);
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+
+            int ip = ipToInt(192, 168, 1, 44);
+            int gw = ipToInt(192, 168, 1, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "Garage5G", "aa:bb:cc:dd:ee:22",
+                    -62, 5500, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+
+            File wifiPub = new File(root, "data/hmgapi/public/wifi.json");
+            File leaseFile = new File(root, "data/hmgapi/wifi/lease");
+            check("Home Wi-Fi public status is up", "up", Json.object(HomeWifiStore.readText(wifiPub)).get("state"));
+            checkTrue("Lease file present while up", leaseFile.isFile());
+
+            // 3. Simulate respawned background projection enabling SoftAP (192.168.0.1) mid-park:
+            //    Controller must immediately drop "up" & lease, disable SoftAP, and reclaim client Wi-Fi!
+            plat.softApActive = true;
+            plat.wifiState = WifiPlatform.WIFI_STATE_DISABLED;
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_ENABLED);
+            check("Public wifi.json immediately leaves 'up' on SoftAP hijack",
+                    "searching", Json.object(HomeWifiStore.readText(wifiPub)).get("state"));
+            checkTrue("Stale lease cleared on SoftAP hijack", !leaseFile.isFile());
+            checkTrue("Hijacking SoftAP immediately disabled", !plat.softApActive);
+
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+            check("Home Wi-Fi automatically reconnects after reclaiming wlan0",
+                    "up", Json.object(HomeWifiStore.readText(wifiPub)).get("state"));
+            checkTrue("Flight log recorded SOFTAP_RECLAIM",
+                    store.flightLog().readPublicTail(65536).contains("SOFTAP_RECLAIM"));
         } finally {
             deleteRec(root);
         }

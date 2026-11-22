@@ -19,19 +19,26 @@ public final class HomeWifiRouter {
     public static final int TABLE = 95;
     public static final int HOME_GID = 2951;
 
+    private static final long EXEC_TIMEOUT_MS = 2500L;
+
     private String activeLeaseSignature = "";
+    private String activeAppliedSignature = "";
     private final Set<String> activeDnsHostRoutes = new LinkedHashSet<String>();
 
     public synchronized boolean routeUp(String ip, String gatewayHint, String dns1Hint, String dns2Hint) {
         String gw = validIpv4(gatewayHint) ? gatewayHint : null;
         String routesRaw = execOut("ip", "route", "show", "dev", IFACE);
         List<String> subnets = new ArrayList<String>();
+        boolean mainHasDefault = false;
         for (String line : routesRaw.split("\n")) {
             String t = line.trim();
             if (t.isEmpty()) continue;
             String[] parts = t.split("\\s+");
-            if (parts.length >= 3 && "default".equals(parts[0]) && "via".equals(parts[1]) && validIpv4(parts[2])) {
-                gw = parts[2];
+            if ("default".equals(parts[0])) {
+                mainHasDefault = true;
+                if (parts.length >= 3 && "via".equals(parts[1]) && validIpv4(parts[2])) {
+                    gw = parts[2];
+                }
             } else if (parts[0].indexOf('/') > 0) {
                 subnets.add(parts[0]);
             }
@@ -40,19 +47,29 @@ public final class HomeWifiRouter {
             return false;
         }
 
+        String d1 = validIpv4(dns1Hint) ? dns1Hint : validProp("dhcp." + IFACE + ".dns1");
+        String d2 = validIpv4(dns2Hint) ? dns2Hint : validProp("dhcp." + IFACE + ".dns2");
+        if (d1 == null) d1 = gw;
+
+        String appliedSig = (ip == null ? "" : ip) + "|" + gw + "|" + d1 + "|" + (d2 == null ? "" : d2);
+        if (!mainHasDefault && appliedSig.equals(activeAppliedSignature)) {
+            String t95 = execOut("ip", "route", "show", "table", String.valueOf(TABLE));
+            if (t95.contains("default")) {
+                return true;
+            }
+        }
+
         // Remove Android's default route on wlan0 in main table so stock head-unit traffic stays on rmnet0
-        for (int i = 0; i < 8; i++) {
-            if (execCode("ip", "route", "del", "default", "dev", IFACE) != 0) break;
+        if (mainHasDefault) {
+            for (int i = 0; i < 8; i++) {
+                if (execCode("ip", "route", "del", "default", "dev", IFACE) != 0) break;
+            }
         }
 
         execCode("ip", "route", "replace", "default", "via", gw, "dev", IFACE, "table", String.valueOf(TABLE));
         for (String subnet : subnets) {
             execCode("ip", "route", "replace", subnet, "dev", IFACE, "table", String.valueOf(TABLE));
         }
-
-        String d1 = validIpv4(dns1Hint) ? dns1Hint : validProp("dhcp." + IFACE + ".dns1");
-        String d2 = validIpv4(dns2Hint) ? dns2Hint : validProp("dhcp." + IFACE + ".dns2");
-        if (d1 == null) d1 = gw;
 
         execCode("ndc", "resolver", "setdefaultif", "rmnet0");
         if (d2 != null && !d2.isEmpty()) {
@@ -85,6 +102,7 @@ public final class HomeWifiRouter {
             }
             activeLeaseSignature = sig;
         }
+        activeAppliedSignature = appliedSig;
         return true;
     }
 
@@ -93,6 +111,7 @@ public final class HomeWifiRouter {
         execCode("iptables", "-t", "nat", "-F", "HMGAPI_HOMEDNS");
         clearDnsHostRoutes();
         activeLeaseSignature = "";
+        activeAppliedSignature = "";
         java.io.File lf = new java.io.File("/data/hmgapi/wifi/lease");
         if (lf.isFile()) lf.delete();
     }
@@ -148,37 +167,68 @@ public final class HomeWifiRouter {
         }
     }
 
-    private static int execCode(String... cmd) {
-        try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            drain(p.getInputStream());
-            return p.waitFor();
-        } catch (Exception e) {
-            return -1;
+    private static final class ProcResult {
+        final int code;
+        final String output;
+        ProcResult(int code, String output) {
+            this.code = code;
+            this.output = output;
         }
+    }
+
+    private static ProcResult runBounded(String... cmd) {
+        Process p = null;
+        try {
+            p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            final InputStream in = p.getInputStream();
+            final ByteArrayOutputStream b = new ByteArrayOutputStream();
+            Thread reader = new Thread("homewifi-exec") {
+                @Override
+                public void run() {
+                    byte[] buf = new byte[512];
+                    try {
+                        for (int n; (n = in.read(buf)) > 0; ) {
+                            b.write(buf, 0, n);
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        try { in.close(); } catch (Exception ignored) {}
+                    }
+                }
+            };
+            reader.setDaemon(true);
+            reader.start();
+
+            long deadline = System.currentTimeMillis() + EXEC_TIMEOUT_MS;
+            Integer exitCode = null;
+            while (System.currentTimeMillis() < deadline) {
+                try {
+                    exitCode = Integer.valueOf(p.exitValue());
+                    break;
+                } catch (IllegalThreadStateException running) {
+                    Thread.sleep(20L);
+                }
+            }
+            if (exitCode == null) {
+                p.destroy();
+                reader.join(150L);
+                return new ProcResult(-1, "");
+            }
+            reader.join(300L);
+            return new ProcResult(exitCode.intValue(), b.toString(StandardCharsets.UTF_8.name()));
+        } catch (Exception e) {
+            if (p != null) {
+                try { p.destroy(); } catch (Exception ignored) {}
+            }
+            return new ProcResult(-1, "");
+        }
+    }
+
+    private static int execCode(String... cmd) {
+        return runBounded(cmd).code;
     }
 
     private static String execOut(String... cmd) {
-        try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            String s = drain(p.getInputStream());
-            p.waitFor();
-            return s;
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private static String drain(InputStream in) {
-        try {
-            ByteArrayOutputStream b = new ByteArrayOutputStream();
-            byte[] buf = new byte[512];
-            for (int n; (n = in.read(buf)) > 0; ) b.write(buf, 0, n);
-            return b.toString(StandardCharsets.UTF_8.name());
-        } catch (Exception e) {
-            return "";
-        } finally {
-            try { in.close(); } catch (Exception ignored) {}
-        }
+        return runBounded(cmd).output;
     }
 }

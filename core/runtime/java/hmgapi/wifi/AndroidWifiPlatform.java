@@ -13,16 +13,20 @@ import android.net.wifi.SupplicantState;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.Parcel;
 import android.os.PowerManager;
 import android.os.SystemClock;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
@@ -30,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -42,7 +47,8 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private static final String WIFI_AP_STATE_CHANGED_ACTION = "android.net.wifi.WIFI_AP_STATE_CHANGED";
     private static final String EXTRA_WIFI_AP_STATE = "wifi_state";
     private static final String VEHICLE_SOCK = "hmgapi-vehicle";
-    private static final long PWRKEEP_REFRESH_MS = 45000L;
+    private static final long PWRKEEP_REFRESH_MS = 30000L;
+    private static final File STANDALONE_BL_MARKER = new File("/dev/.hmgapi-wifi-bl");
 
     private final Context context;
     private final WifiManager wifiManager;
@@ -60,9 +66,26 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private boolean wifiLockRecorded = false;
     private boolean wakeLockRecorded = false;
     private boolean pwrKeepHeld = false;
+    private boolean parkedDarkEntered = false;
+    private boolean standaloneDarkBlanked = false;
+    private boolean standaloneMutedAv = false;
+    private boolean standaloneTurnedAvOff = false;
+    private final Map<String, Integer> savedBacklight = new LinkedHashMap<String, Integer>();
     private long lastPwrKeepAssertMs = 0L;
     private String lastPwrKeepWaitSig = "";
+    private volatile int liveMicomDoorsClosed = -1;
+    private volatile VehicleSnapshot lastGoodVehicle = null;
+    private Binder micomPwrListener = null;
+    private Binder micomBcmListener = null;
     private final File peerOpenLinkLeaseFile = new File("/data/hmgapi/public/openlink-keepawake.json");
+
+    private final Runnable vehiclePushWakeRunnable = new Runnable() {
+        @Override
+        public void run() {
+            Events ev = eventListener;
+            if (ev != null) ev.onVehicleSignalChanged();
+        }
+    };
 
     private final BroadcastReceiver wifiReceiver = new BroadcastReceiver() {
         @Override
@@ -99,7 +122,9 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         this.iWifiManager = bindIWifiManager();
         this.wifiManager = resolveWifiManager(sysContext, this.iWifiManager);
         initLocks(sysContext, this.wifiManager);
+        recoverStandaloneBacklightMarkerIfOn();
         registerBroadcasts();
+        ensureMicomVehiclePushListeners();
     }
 
     private void initLocks(Context ctx, WifiManager wm) {
@@ -217,19 +242,128 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
+    private void triggerVehiclePushWake() {
+        handler.removeCallbacks(vehiclePushWakeRunnable);
+        handler.post(vehiclePushWakeRunnable);
+    }
+
+    private void ensureMicomVehiclePushListeners() {
+        if (micomPwrListener == null) {
+            try {
+                Object svc = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
+                if (svc != null) {
+                    final String desc = "com.hkmc.power.IMicomPowerStatusListener";
+                    Class<?> ifaceCls = Class.forName(desc);
+                    Class<?> stubCls = Class.forName(desc + "$Stub");
+                    final int txChanged = readStaticIntField(stubCls, "TRANSACTION_onPowerStatusChanged", -1);
+                    final int txPrepOff = readStaticIntField(stubCls, "TRANSACTION_onPrepareSystemOff", -1);
+                    final int txSysOff = readStaticIntField(stubCls, "TRANSACTION_onSystemOff", -1);
+                    Binder b = new Binder() {
+                        { attachInterface(null, desc); }
+                        @Override
+                        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
+                            if (code == INTERFACE_TRANSACTION) {
+                                if (reply != null) reply.writeString(desc);
+                                return true;
+                            }
+                            if (code == txChanged || code == txPrepOff || code == txSysOff) {
+                                triggerVehiclePushWake();
+                            }
+                            if (reply != null) answerMicomBinderSafe(data, reply);
+                            return true;
+                        }
+                    };
+                    Object proxy = stubCls.getMethod("asInterface", IBinder.class).invoke(null, b);
+                    svc.getClass().getMethod("registerPowerStatusListener", ifaceCls).invoke(svc, proxy);
+                    micomPwrListener = b;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (micomBcmListener == null) {
+            try {
+                Object svc = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
+                if (svc != null) {
+                    final String desc = "com.hkmc.bcm.IBCMListener";
+                    Class<?> ifaceCls = Class.forName(desc);
+                    Class<?> stubCls = Class.forName(desc + "$Stub");
+                    final int txDoors = readStaticIntField(stubCls, "TRANSACTION_onDoorAllStateChanged", -1);
+                    final int txIgn = readStaticIntField(stubCls, "TRANSACTION_onIgnitionChanged", -1);
+                    final int txAcc = readStaticIntField(stubCls, "TRANSACTION_onACCChanged", -1);
+                    Binder b = new Binder() {
+                        { attachInterface(null, desc); }
+                        @Override
+                        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
+                            if (code == INTERFACE_TRANSACTION) {
+                                if (reply != null) reply.writeString(desc);
+                                return true;
+                            }
+                            try {
+                                if (code == txDoors) {
+                                    data.enforceInterface(desc);
+                                    if (data.dataAvail() >= 32) {
+                                        for (int i = 0; i < 4; i++) data.readInt(); // 4 unlock states
+                                        boolean anyOpen = false;
+                                        for (int i = 0; i < 4; i++) {
+                                            if (data.readInt() == 1) anyOpen = true;
+                                        }
+                                        liveMicomDoorsClosed = anyOpen ? 0 : 1;
+                                    }
+                                    triggerVehiclePushWake();
+                                } else if (code == txIgn || code == txAcc) {
+                                    triggerVehiclePushWake();
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                            if (reply != null) answerMicomBinderSafe(data, reply);
+                            return true;
+                        }
+                    };
+                    Object proxy = stubCls.getMethod("asInterface", IBinder.class).invoke(null, b);
+                    svc.getClass().getMethod("registerBCMListener", ifaceCls, IBinder.class).invoke(svc, proxy, b);
+                    micomBcmListener = b;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static int readStaticIntField(Class<?> cls, String name, int fallback) {
+        try {
+            Field f = cls.getDeclaredField(name);
+            f.setAccessible(true);
+            return f.getInt(null);
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private static void answerMicomBinderSafe(Parcel data, Parcel reply) {
+        reply.writeNoException();
+        int end = data.dataSize();
+        if (end < 4) return;
+        data.setDataPosition(end - 4);
+        int n = data.readInt();
+        if (n >= 0 && n <= 64 * 1024) {
+            reply.writeByteArray(new byte[n]);
+        }
+    }
+
     @Override
     public VehicleSnapshot readVehicle() {
+        ensureMicomVehiclePushListeners();
         LocalSocket s = new LocalSocket();
         try {
             s.connect(new LocalSocketAddress(VEHICLE_SOCK, LocalSocketAddress.Namespace.ABSTRACT));
             s.setSoTimeout(2000);
             OutputStream out = s.getOutputStream();
-            out.write("read power parked gear.park charging charging.plugged battery12v.soc battery12v.saver\n"
+            out.write("read power parked doors.closed gear.park charging charging.plugged battery12v.soc battery12v.saver\n"
                     .getBytes(StandardCharsets.UTF_8));
             out.flush();
             BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
             String power = "";
             boolean parked = false;
+            int doorsClosed = -1;
             boolean gearPark = false;
             boolean charging = false;
             boolean pluggedIn = false;
@@ -244,7 +378,10 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 if ("-".equals(v)) continue;
                 if ("power".equals(k)) power = v;
                 else if ("parked".equals(k)) parked = "1".equals(v) || "true".equalsIgnoreCase(v);
-                else if ("gear.park".equals(k)) gearPark = "1".equals(v) || "true".equalsIgnoreCase(v);
+                else if ("doors.closed".equals(k)) {
+                    if ("1".equals(v) || "true".equalsIgnoreCase(v)) doorsClosed = 1;
+                    else if ("0".equals(v) || "false".equalsIgnoreCase(v)) doorsClosed = 0;
+                } else if ("gear.park".equals(k)) gearPark = "1".equals(v) || "true".equalsIgnoreCase(v);
                 else if ("charging".equals(k)) {
                     charging = !"0".equals(v) && !"off".equalsIgnoreCase(v) && !"false".equalsIgnoreCase(v);
                 } else if ("charging.plugged".equals(k)) {
@@ -255,11 +392,69 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                     saver12v = "1".equals(v);
                 }
             }
-            return new VehicleSnapshot(power, parked, gearPark, pluggedIn || charging, charging, bat12v, saver12v);
+            if (liveMicomDoorsClosed == 0 || (doorsClosed < 0 && liveMicomDoorsClosed >= 0)) {
+                doorsClosed = liveMicomDoorsClosed;
+            }
+            if (power.isEmpty()) {
+                power = readDirectMicomPowerNameFallback();
+            }
+            VehicleSnapshot snap = new VehicleSnapshot(
+                    power, parked, gearPark, pluggedIn || charging, charging, bat12v, saver12v, doorsClosed);
+            lastGoodVehicle = snap;
+            if (snap.isPowerOn()) {
+                restoreStandaloneDarkIfNeeded();
+            }
+            return snap;
         } catch (Exception e) {
+            VehicleSnapshot prev = lastGoodVehicle;
+            String directPower = readDirectMicomPowerNameFallback();
+            if (!directPower.isEmpty()) {
+                boolean isOn = "on".equalsIgnoreCase(directPower);
+                if (isOn) {
+                    restoreStandaloneDarkIfNeeded();
+                    return new VehicleSnapshot("on", false, prev != null && prev.gearPark);
+                }
+                if (prev != null) {
+                    return new VehicleSnapshot(
+                            directPower,
+                            prev.parked,
+                            prev.gearPark,
+                            prev.pluggedIn,
+                            prev.charging,
+                            prev.bat12vSoc,
+                            prev.saver12v,
+                            liveMicomDoorsClosed >= 0 ? liveMicomDoorsClosed : prev.doorsClosed);
+                }
+                return new VehicleSnapshot(directPower, false, true, false, false, -1, false, liveMicomDoorsClosed);
+            }
+            if (prev != null) {
+                return prev;
+            }
             return new VehicleSnapshot("on", false, false);
         } finally {
+            try { s.shutdownInput(); } catch (Exception ignored) {}
+            try { s.shutdownOutput(); } catch (Exception ignored) {}
             try { s.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private static String readDirectMicomPowerNameFallback() {
+        try {
+            Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
+            if (pwr == null) return "";
+            Object pObj = pwr.getClass().getMethod("getPowerStatus").invoke(pwr);
+            int p = pObj instanceof Number ? ((Number) pObj).intValue() : -1;
+            switch (p) {
+                case 0: return "on";
+                case 1: return "logic_on";
+                case 2: return "adm";
+                case 6: return "delay_mode";
+                case 7: return "preparing_off";
+                case 255: return "off";
+                default: return "";
+            }
+        } catch (Throwable ignored) {
+            return "";
         }
     }
 
@@ -392,25 +587,32 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
         if (holdParkedPower) {
             long now = elapsedRealtimeMs();
-            if (!pwrKeepHeld || (now - lastPwrKeepAssertMs) >= PWRKEEP_REFRESH_MS) {
-                boolean isRefresh = pwrKeepHeld;
-                if (assertMicomPwrKeepDarkSafe(isRefresh)) {
+            boolean darkActive = holdWifiLock; // false = ADM RAP pre-latch while seated; true = parked dark session
+            boolean enteringDark = darkActive && !parkedDarkEntered;
+            if (!pwrKeepHeld || enteringDark || (now - lastPwrKeepAssertMs) >= PWRKEEP_REFRESH_MS) {
+                boolean isRefresh = pwrKeepHeld && !enteringDark;
+                if (assertMicomPwrKeepDarkSafe(isRefresh, darkActive)) {
                     if (!pwrKeepHeld) {
-                        log("Acquired parked MICOM PwrKeep(1) + PARTIAL_WAKE_LOCK");
+                        log("Acquired MICOM PwrKeep(1) (" + (darkActive ? "parked dark" : "ADM pre-latch") + ")");
                     }
                     pwrKeepHeld = true;
+                    if (darkActive) parkedDarkEntered = true;
                     lastPwrKeepAssertMs = now;
                 }
+            } else if (darkActive && !isPeerOpenLinkHoldingPower()) {
+                enforceStandaloneDarkBlankingQuietly();
             }
         } else {
             lastPwrKeepWaitSig = "";
+            boolean wasDark = parkedDarkEntered;
+            parkedDarkEntered = false;
             if (pwrKeepHeld) {
                 pwrKeepHeld = false;
                 lastPwrKeepAssertMs = 0L;
                 if (!isPeerOpenLinkHoldingPower()) {
-                    releaseMicomPwrKeepQuietly();
-                    recordPlatformFlight("PWRKEEP_STOP", "peerHold=false", true);
-                    log("Released parked MICOM PwrKeep(1)");
+                    String stopDetail = releaseMicomPwrKeepQuietly(wasDark);
+                    recordPlatformFlight("PWRKEEP_STOP", "peerHold=false " + stopDetail, true);
+                    log("Released parked MICOM PwrKeep(1) (" + stopDetail + ")");
                 } else {
                     recordPlatformFlight("PWRKEEP_DEFER_PEER", "peerHold=true", true);
                     log("Deferred MICOM PwrKeepStop(1) to active OpenLink lease");
@@ -430,21 +632,31 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
-    private static Object getMicomBinder(String serviceName, String stubClassName) {
+    private static Object getMicomBinder(String serviceName, String preferredStubClassName) {
         try {
             Object b = Class.forName("android.os.ServiceManager")
                     .getMethod("getService", String.class)
                     .invoke(null, serviceName);
             if (b == null) return null;
-            return Class.forName(stubClassName)
-                    .getMethod("asInterface", IBinder.class)
-                    .invoke(null, b);
+            try {
+                return Class.forName(preferredStubClassName)
+                        .getMethod("asInterface", IBinder.class)
+                        .invoke(null, b);
+            } catch (Throwable fallback) {
+                String desc = ((IBinder) b).getInterfaceDescriptor();
+                if (desc != null && !desc.isEmpty()) {
+                    return Class.forName(desc + "$Stub")
+                            .getMethod("asInterface", IBinder.class)
+                            .invoke(null, b);
+                }
+                return null;
+            }
         } catch (Throwable ignored) {
             return null;
         }
     }
 
-    private boolean assertMicomPwrKeepDarkSafe(boolean isRefresh) {
+    private boolean assertMicomPwrKeepDarkSafe(boolean isRefresh, boolean darkSessionActive) {
         try {
             Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
             if (pwr == null) {
@@ -483,7 +695,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 avOff = Boolean.TRUE.equals(pwr.getClass().getMethod("isAvPowerOff").invoke(pwr));
             } catch (Throwable ignored) {
             }
-            Object bsSvc = getMicomBinder("com.hkmc.micom.blackscreen", "com.hkmc.blackscreen.IMicomBlackScreenService$Stub");
+            Object bsSvc = getMicomBinder("com.hkmc.micom.blackscreen", "com.hkmc.power.IBlackScreenService$Stub");
             boolean bsShown = false;
             if (bsSvc != null) {
                 try {
@@ -493,7 +705,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             }
 
             String stateSummary = "pwrSt=" + pwrSt + " admSt=" + admSt + " prepOff=" + prepOff
-                    + " ign=" + ignOn + " avOff=" + avOff + " bs=" + bsShown;
+                    + " ign=" + ignOn + " avOff=" + avOff + " bs=" + bsShown + " dark=" + darkSessionActive;
 
             if (pwrSt == 0 || ignOn) {
                 String sig = "ign_active|" + stateSummary;
@@ -503,27 +715,18 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 }
                 return false;
             }
-            if (!avOff && !bsShown && pwrSt == 1) {
-                // Still in Retained Accessory Power before driver door opens
-                String sig = "rap_wait|" + stateSummary;
-                if (!sig.equals(lastPwrKeepWaitSig)) {
-                    lastPwrKeepWaitSig = sig;
-                    recordPlatformFlight("PWRKEEP_WAIT", "reason=rap_wait " + stateSummary, true);
-                }
-                return false;
-            }
 
+            // Latch requestPwrKeepStart(1) immediately in ADM (pwrSt==2) BEFORE MICOM transitions
+            // to DELAY_MODE (pwrSt==6, which has an unstoppable 180s hardware cutoff).
             pwr.getClass().getMethod("requestPwrKeepStart", int.class).invoke(pwr, Integer.valueOf(1));
 
             boolean peerHold = isPeerOpenLinkHoldingPower();
-            // Ensure panel stays dark if OpenLink isn't already managing backlight
-            if (!peerHold && bsSvc != null && !bsShown) {
-                try { bsSvc.getClass().getMethod("showBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
-                try { bsSvc.getClass().getMethod("screenOff").invoke(bsSvc); } catch (Throwable ignored) {}
+            if (darkSessionActive && !peerHold) {
+                enforceStandaloneDarkBlankingQuietly();
             }
             lastPwrKeepWaitSig = "";
-            recordPlatformFlight(isRefresh ? "PWRKEEP_REFRESH" : "PWRKEEP_START",
-                    stateSummary + " peerHold=" + peerHold, true);
+            String tag = isRefresh ? "PWRKEEP_REFRESH" : (darkSessionActive ? "PWRKEEP_START" : "PWRKEEP_PRELATCH");
+            recordPlatformFlight(tag, stateSummary + " peerHold=" + peerHold, true);
             return true;
         } catch (Throwable t) {
             String errSig = "err:" + t.getClass().getSimpleName();
@@ -535,14 +738,227 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
-    private static void releaseMicomPwrKeepQuietly() {
+    private void enforceStandaloneDarkBlankingQuietly() {
+        try {
+            Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
+            if (pwr != null) {
+                Object pObj = pwr.getClass().getMethod("getPowerStatus").invoke(pwr);
+                int pwrSt = pObj instanceof Number ? ((Number) pObj).intValue() : -1;
+                if (pwrSt == 0 || pwrSt == 1) return;
+                if (!standaloneDarkBlanked) {
+                    boolean avWasOff = false;
+                    try {
+                        avWasOff = Boolean.TRUE.equals(pwr.getClass().getMethod("isAvPowerOff").invoke(pwr));
+                    } catch (Throwable ignored) {}
+                    if (!avWasOff) {
+                        Object aud = getMicomBinder("com.hkmc.micom.audiosetup", "com.hkmc.media.IMicomAudioService$Stub");
+                        if (aud != null) {
+                            try {
+                                boolean userMuted = Boolean.TRUE.equals(aud.getClass().getMethod("getUserMuteState").invoke(aud));
+                                aud.getClass().getMethod("muteAV").invoke(aud);
+                                if (!userMuted) standaloneMutedAv = true;
+                            } catch (Throwable ignored) {}
+                        }
+                        Object mode = getMicomBinder("com.hkmc.micom.mode", "com.hkmc.mode.IModeManager$Stub");
+                        if (mode != null) {
+                            try {
+                                mode.getClass().getMethod("setAVOn", boolean.class).invoke(mode, Boolean.FALSE);
+                                standaloneTurnedAvOff = true;
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                }
+                try { pwr.getClass().getMethod("setScreenOn", boolean.class).invoke(pwr, Boolean.FALSE); } catch (Throwable ignored) {}
+                try {
+                    pwr.getClass().getMethod("requestLcdControl", boolean.class, boolean.class, boolean.class, boolean.class)
+                            .invoke(pwr, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE);
+                } catch (Throwable ignored) {}
+            }
+            Object bsSvc = getMicomBinder("com.hkmc.micom.blackscreen", "com.hkmc.power.IBlackScreenService$Stub");
+            if (bsSvc != null) {
+                try { bsSvc.getClass().getMethod("showBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
+                try { bsSvc.getClass().getMethod("screenOff").invoke(bsSvc); } catch (Throwable ignored) {}
+            }
+            blankSysfsBacklightStandalone();
+            standaloneDarkBlanked = true;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void restoreStandaloneDarkIfNeeded() {
+        if (!standaloneDarkBlanked && !STANDALONE_BL_MARKER.isFile()) return;
+        standaloneDarkBlanked = false;
+        restoreSysfsBacklightStandalone();
+        try {
+            Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
+            if (pwr != null) {
+                try { pwr.getClass().getMethod("powerOn").invoke(pwr); } catch (Throwable ignored) {}
+                try { pwr.getClass().getMethod("setScreenOn", boolean.class).invoke(pwr, Boolean.TRUE); } catch (Throwable ignored) {}
+                try {
+                    pwr.getClass().getMethod("requestLcdControl", boolean.class, boolean.class, boolean.class, boolean.class)
+                            .invoke(pwr, Boolean.TRUE, Boolean.TRUE, Boolean.TRUE, Boolean.TRUE);
+                } catch (Throwable ignored) {}
+            }
+            Object bsSvc = getMicomBinder("com.hkmc.micom.blackscreen", "com.hkmc.power.IBlackScreenService$Stub");
+            if (bsSvc != null) {
+                try { bsSvc.getClass().getMethod("hideBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
+                try { bsSvc.getClass().getMethod("screenOn").invoke(bsSvc); } catch (Throwable ignored) {}
+            }
+            if (standaloneTurnedAvOff) {
+                standaloneTurnedAvOff = false;
+                Object mode = getMicomBinder("com.hkmc.micom.mode", "com.hkmc.mode.IModeManager$Stub");
+                if (mode != null) {
+                    try { mode.getClass().getMethod("setAVOn", boolean.class).invoke(mode, Boolean.TRUE); } catch (Throwable ignored) {}
+                }
+            }
+            if (standaloneMutedAv) {
+                standaloneMutedAv = false;
+                Object aud = getMicomBinder("com.hkmc.micom.audiosetup", "com.hkmc.media.IMicomAudioService$Stub");
+                if (aud != null) {
+                    try { aud.getClass().getMethod("unMuteAV").invoke(aud); } catch (Throwable ignored) {}
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void recoverStandaloneBacklightMarkerIfOn() {
+        if (!STANDALONE_BL_MARKER.isFile()) return;
+        String p = readDirectMicomPowerNameFallback();
+        if ("on".equals(p) || "logic_on".equals(p) || p.isEmpty()) {
+            restoreStandaloneDarkIfNeeded();
+        }
+    }
+
+    private synchronized void blankSysfsBacklightStandalone() {
+        List<File> dirs = findBacklightDirs();
+        if (dirs.isEmpty()) return;
+        for (File d : dirs) {
+            File br = new File(d, "brightness");
+            int cur = readSysfsIntQuietly(br, -1);
+            if (cur > 0) savedBacklight.put(br.getAbsolutePath(), Integer.valueOf(cur));
+        }
+        if (!STANDALONE_BL_MARKER.isFile() && !savedBacklight.isEmpty()) {
+            StringBuilder sb = new StringBuilder(96);
+            for (Map.Entry<String, Integer> e : savedBacklight.entrySet()) {
+                if (e.getValue() != null && e.getValue().intValue() > 0) {
+                    sb.append(e.getKey()).append('=').append(e.getValue().intValue()).append('\n');
+                }
+            }
+            if (sb.length() > 0) writeFileQuietly(STANDALONE_BL_MARKER, sb.toString());
+        }
+        for (File d : dirs) {
+            writeFileQuietly(new File(d, "brightness"), "0\n");
+            File blp = new File(d, "bl_power");
+            if (blp.isFile()) writeFileQuietly(blp, "4\n");
+        }
+    }
+
+    private synchronized void restoreSysfsBacklightStandalone() {
+        if (STANDALONE_BL_MARKER.isFile()) {
+            try {
+                for (String line : HomeWifiStore.readText(STANDALONE_BL_MARKER).split("\n")) {
+                    int eq = line.indexOf('=');
+                    if (eq > 0) {
+                        String k = line.substring(0, eq).trim();
+                        int v = Integer.parseInt(line.substring(eq + 1).trim());
+                        if (v > 0 && !savedBacklight.containsKey(k)) {
+                            savedBacklight.put(k, Integer.valueOf(v));
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        for (File d : findBacklightDirs()) {
+            File blp = new File(d, "bl_power");
+            if (blp.isFile()) writeFileQuietly(blp, "0\n");
+            File br = new File(d, "brightness");
+            Integer sv = savedBacklight.get(br.getAbsolutePath());
+            int target = (sv != null && sv.intValue() > 0) ? sv.intValue() : -1;
+            if (target <= 0) {
+                int maxBr = readSysfsIntQuietly(new File(d, "max_brightness"), 255);
+                target = Math.max(1, (maxBr > 0 ? maxBr : 255) * 3 / 4);
+            }
+            writeFileQuietly(br, target + "\n");
+        }
+        STANDALONE_BL_MARKER.delete();
+    }
+
+    private static List<File> findBacklightDirs() {
+        List<File> out = new ArrayList<File>(4);
+        File[] bl = new File("/sys/class/backlight").listFiles();
+        if (bl != null) {
+            for (File d : bl) {
+                if (new File(d, "brightness").isFile()) out.add(d);
+            }
+        }
+        File[] leds = new File("/sys/class/leds").listFiles();
+        if (leds != null) {
+            for (File d : leds) {
+                String n = d.getName().toLowerCase(Locale.US);
+                if ((n.contains("backlight") || n.contains("lcd"))
+                        && !n.contains("key") && !n.contains("button")
+                        && !n.contains("kbd") && !n.contains("charging")
+                        && new File(d, "brightness").isFile()) {
+                    out.add(d);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static int readSysfsIntQuietly(File f, int def) {
+        try {
+            return Integer.parseInt(HomeWifiStore.readText(f).trim());
+        } catch (Throwable ignored) {
+            return def;
+        }
+    }
+
+    private static void writeFileQuietly(File f, String content) {
+        FileOutputStream out = null;
+        try {
+            out = new FileOutputStream(f);
+            out.write(content.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        } catch (Throwable ignored) {
+        } finally {
+            if (out != null) {
+                try { out.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    private static String releaseMicomPwrKeepQuietly(boolean advanceAdmIfStillParked) {
+        String detail = "stop=ERR";
         try {
             Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
             if (pwr != null) {
                 pwr.getClass().getMethod("requestPwrKeepStop", int.class).invoke(pwr, Integer.valueOf(1));
+                detail = "stop=OK";
+                if (advanceAdmIfStillParked) {
+                    Object pObj = pwr.getClass().getMethod("getPowerStatus").invoke(pwr);
+                    int pwrSt = pObj instanceof Number ? ((Number) pObj).intValue() : -1;
+                    boolean ignOn = false;
+                    Object bcm = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
+                    if (bcm != null) {
+                        try {
+                            Object ign = bcm.getClass().getMethod("getIGNStatus").invoke(bcm);
+                            ignOn = Boolean.TRUE.equals(ign) || (ign instanceof Number && ((Number) ign).intValue() == 1);
+                        } catch (Throwable ignored) {}
+                    }
+                    if (!ignOn && pwrSt == 2) {
+                        Object sys = getMicomBinder("com.hkmc.micom.system", "com.hkmc.micom.ISystemService$Stub");
+                        if (sys != null) {
+                            sys.getClass().getMethod("requestDelayModeOnADM").invoke(sys);
+                            detail = "stop=OK delayAdm=OK";
+                        }
+                    }
+                }
             }
         } catch (Throwable ignored) {
         }
+        return detail;
     }
 
     @Override

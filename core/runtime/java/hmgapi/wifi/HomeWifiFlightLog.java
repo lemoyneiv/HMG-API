@@ -173,26 +173,32 @@ public final class HomeWifiFlightLog {
                                                String phase,
                                                String power,
                                                String lastEventSummary) {
+        RandomAccessFile raf = null;
         try {
             ensureOwnerDir(wifiDir);
+            boolean created = !activeMarker.exists();
             String line = hashBootTag(bootId) + "\t"
                     + wallEpochSec + "\t"
                     + elapsedMs + "\t"
                     + sanitizeToken(phase) + "\t"
                     + sanitizeToken(power) + "\t"
                     + sanitizeInline(scrubPublic(lastEventSummary)) + "\n";
-            File tmp = new File(wifiDir, ".session.active.tmp");
-            FileOutputStream out = new FileOutputStream(tmp);
-            try {
-                out.write(line.getBytes(StandardCharsets.UTF_8));
-                out.flush();
-                try { out.getFD().sync(); } catch (IOException ignored) {}
-            } finally {
-                out.close();
+            byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
+            raf = new RandomAccessFile(activeMarker, "rw");
+            raf.setLength(0L);
+            raf.seek(0L);
+            raf.write(bytes);
+            try { raf.getFD().sync(); } catch (IOException ignored) {}
+            raf.close();
+            raf = null;
+            if (created) {
+                setPerms(activeMarker, false);
             }
-            setPerms(tmp, false);
-            tmp.renameTo(activeMarker);
         } catch (IOException ignored) {
+        } finally {
+            if (raf != null) {
+                try { raf.close(); } catch (IOException ignored) {}
+            }
         }
     }
 

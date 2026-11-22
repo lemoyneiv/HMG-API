@@ -61,6 +61,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     // Session & vehicle state
     private long lastSleepGapMs = Long.MIN_VALUE;
     private long powerOffSinceMs = -1L;
+    private boolean doorOpenedWhileOff = false;
     private boolean manualActive = false;
     private long manualDeadlineMs = 0L; // 0 = unlimited while in P
     private boolean sessionActive = false;
@@ -426,9 +427,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
             return;
         }
 
-        platform.setSessionLocks(false, false);
+        boolean admPreLatch = !veh.isPowerOn() && shouldPreLatchAdmPower(veh, curBoot, nowElapsed, hasHomeProfile);
+        platform.setSessionLocks(false, admPreLatch);
         phase = "standby";
-        headline = "Standby (Car is on)";
+        headline = veh.isPowerOn() ? "Standby (Car is on)" : "Standby (Accessory / RAP)";
         if (hasHomeProfile) {
             detail = "Wireless CarPlay / Android Auto is active. Home Wi-Fi connects automatically when parked, or tap \"Scan & Connect Now\" in Park.";
         } else {
@@ -438,12 +440,34 @@ public final class HomeWifiController implements WifiPlatform.Events {
         scheduleVehicleTick();
     }
 
+    private boolean shouldPreLatchAdmPower(WifiPlatform.VehicleSnapshot veh,
+                                           String curBoot,
+                                           long nowElapsed,
+                                           boolean hasHomeProfile) {
+        if (veh == null || veh.isPowerOn() || veh.saver12v) return false;
+        int floor = veh.pluggedIn ? HomeWifiKeepAwake.MIN_12V_PLUGGED_IDLE : HomeWifiKeepAwake.MIN_12V_UNPLUGGED;
+        if (!veh.charging && veh.bat12vSoc >= 0 && veh.bat12vSoc < floor) return false;
+        HomeWifiKeepAwake.PeerLease peer = store.readPeerOpenLinkLease();
+        if (peer != null && peer.isFreshAndActive(curBoot, nowElapsed)) {
+            return true;
+        }
+        if (!hasHomeProfile) return false;
+        String code = veh.pluggedIn
+                ? HomeWifiKeepAwake.normalizePluggedCode(store.getKeepAwakePlugged())
+                : HomeWifiKeepAwake.normalizeUnpluggedCode(store.getKeepAwakeUnplugged());
+        return !"off".equals(code);
+    }
+
     private boolean evaluateOffLong(WifiPlatform.VehicleSnapshot veh, long nowElapsed) {
         if (veh.isPowerOn()) {
             powerOffSinceMs = -1L;
+            doorOpenedWhileOff = false;
             return false;
         }
-        if (veh.parked) {
+        if (veh.doorsClosed == 0) {
+            doorOpenedWhileOff = true;
+        }
+        if (veh.parked || (doorOpenedWhileOff && veh.gearPark)) {
             return true;
         }
         if (powerOffSinceMs < 0L) {
@@ -990,10 +1014,20 @@ public final class HomeWifiController implements WifiPlatform.Events {
     }
 
     @Override
+    public synchronized void onVehicleSignalChanged() {
+        tickVehicleAndHealth();
+    }
+
+    @Override
     public synchronized void onApStateChanged(int apState) {
         if (!sessionActive) return;
         if (apState == WifiPlatform.AP_STATE_DISABLED && "disabling_ap".equals(phase)) {
             enableStationHardware();
+            return;
+        }
+        if ((apState == WifiPlatform.AP_STATE_ENABLING || apState == WifiPlatform.AP_STATE_ENABLED)
+                && !"disabling_ap".equals(phase)) {
+            reclaimFromSoftApHijack("ap_state:" + apState);
         }
     }
 
@@ -1002,6 +1036,52 @@ public final class HomeWifiController implements WifiPlatform.Events {
         if (!sessionActive) return;
         if (wifiState == WifiPlatform.WIFI_STATE_ENABLED && "enabling_wifi".equals(phase)) {
             onStationHardwareReady();
+            return;
+        }
+        if ((wifiState == WifiPlatform.WIFI_STATE_DISABLED || wifiState == WifiPlatform.WIFI_STATE_DISABLING)
+                && !"disabling_ap".equals(phase) && !"enabling_wifi".equals(phase)) {
+            reclaimFromSoftApHijack("wifi_state:" + wifiState);
+        }
+    }
+
+    private void reclaimFromSoftApHijack(String trigger) {
+        if (!sessionActive) return;
+        cancelAllTimers();
+        isConnectingToTarget = false;
+        isFastConnecting = false;
+        isPollingDhcp = false;
+        targetSsid = null;
+        targetNetId = -1;
+        connectedSsid = "";
+        connectedIp = "";
+        connectedGateway = "";
+        connectedRssi = 0;
+        connectedFreq = 0;
+
+        platform.routeDown();
+        store.clearLease();
+        store.writePublicStatus(store.hasUsableHomeProfile() ? "searching" : "nonetworks", 0, 0);
+
+        String msg = "trigger=" + trigger + " apOn=" + platform.isSoftApActiveOrEnabling();
+        recordFlight("SOFTAP_RECLAIM", msg, msg, true);
+        platform.log("Reclaiming wlan0 for Home Wi-Fi (" + msg + ")");
+
+        if (platform.isSoftApActiveOrEnabling()) {
+            phase = "disabling_ap";
+            headline = "Reclaiming Wi-Fi…";
+            detail = "Pausing wireless projection hotspot to restore Home Wi-Fi…";
+            platform.disableSoftAp(savedApMode);
+            platform.scheduleDelayed(TAG_AP_FALLBACK, AP_DISABLE_FALLBACK_MS, new Runnable() {
+                @Override
+                public void run() {
+                    synchronized (HomeWifiController.this) {
+                        if (!sessionActive || !"disabling_ap".equals(phase)) return;
+                        enableStationHardware();
+                    }
+                }
+            });
+        } else {
+            enableStationHardware();
         }
     }
 
@@ -1331,6 +1411,16 @@ public final class HomeWifiController implements WifiPlatform.Events {
     }
 
     private void maintainActiveSession() {
+        if (!"disabling_ap".equals(phase) && !"enabling_wifi".equals(phase)) {
+            if (platform.isSoftApActiveOrEnabling()) {
+                reclaimFromSoftApHijack("health_ap_on");
+                return;
+            }
+            if (platform.getWifiState() == WifiPlatform.WIFI_STATE_DISABLED) {
+                reclaimFromSoftApHijack("health_wifi_off");
+                return;
+            }
+        }
         if ("connected".equals(phase)) {
             WifiPlatform.ConnectionSnapshot snap = platform.getConnectionSnapshot();
             if (snap.supState != WifiPlatform.SupState.COMPLETED
