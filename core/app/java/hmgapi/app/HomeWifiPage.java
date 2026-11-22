@@ -5,7 +5,9 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -17,25 +19,38 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.File;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
- * Settings > Home Wi-Fi: the owner's switch, the saved networks (Android's own Wi-Fi config), the
- * networks seen last time home Wi-Fi was on, add and forget. Everything goes through hmgapid wifi
- * (the keeper's script, as root); a key is only ever sent to it, never shown or logged. Typing a
- * key needs the car in P.
+ * Settings > Home Wi-Fi: live connection status, interactive Park scanning & tap-to-connect,
+ * saved networks with per-SSID "Use for Home Wi-Fi" exclusion (for dashcams / non-internet APs),
+ * hidden network setup, and per-mod mobile data overrides.
  */
 final class HomeWifiPage {
+    private static final long POLL_INTERVAL_MS = 1500L;
+
     final MainActivity a;
     final LinearLayout page;
-    LinearLayout saved, found, cellular;
-    TextView nowView;
+
+    LinearLayout statusCard;
+    LinearLayout statusPillHolder;
+    TextView detailView;
+    LinearLayout controlsHolder;
+    TextView savedHeaderNote;
+    LinearLayout savedList;
+    TextView nearbyTitle;
+    TextView nearbyNote;
+    LinearLayout nearbyList;
+    LinearLayout cellular;
+
+    boolean pollInFlight = false;
+    String lastControlsSig = "";
+    String lastSavedSig = "";
+    String lastNearbySig = "";
+    JSONObject lastStatus = null;
 
     HomeWifiPage(MainActivity a, LinearLayout page) {
         this.a = a;
@@ -43,328 +58,785 @@ final class HomeWifiPage {
     }
 
     void show(final SettingsTab tab) {
-        Ui.text(page, "Home Wi-Fi", 21, true, Ui.TEXT);
-        Ui.text(page, "On: when the car has been off for 30 seconds, the head unit joins your home Wi-Fi. "
-                + "The car's Wi-Fi for wireless CarPlay and Android Auto goes off meanwhile and comes back when you switch "
-                + "on. Only HMG-API and mods that ask use home Wi-Fi; the car's own services stay on its mobile data. "
-                + "Turning it on needs applying and a restart.", 16, false, Ui.GREY);
-        android.widget.Switch sw = Ui.switchRow(page, "Use home Wi-Fi");
-        Ui.allowSwitch(a, sw, "home_wifi", false, new Runnable() {
+        Ui.text(page, "Automatically connects to your saved Wi-Fi networks 30 seconds after you turn off the car so HMG-API "
+                + "and enabled mods can sync without using mobile data. Wireless CarPlay and Android Auto pause while Home Wi-Fi "
+                + "is active and resume automatically when you start the car.", 16, false, Ui.GREY);
+
+        Switch enableSw = Ui.switchRow(page, "Enable Home Wi-Fi");
+        Ui.allowSwitch(a, enableSw, "home_wifi", false, new Runnable() {
             @Override
             public void run() {
-                a.plan();   // apply() marks needRestart() once applied; calling needRestart() before plan() ran two engine plans at once
-                loadSaved();
-                scan();
+                a.plan(); // apply() marks needRestart() once applied
+                refreshNow();
             }
         });
-        nowView = Ui.text(page, "Now: " + now(), 16, false, Ui.TEXT);
-        startNowPoll();
-        final SharedPreferences prefs = a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE);
-        LinearLayout timer = Ui.row(a);
-        page.addView(timer);
-        final CheckBox limit = new CheckBox(a);
-        limit.setText("Turn off after");
-        limit.setTextColor(Ui.TEXT);
-        Ui.size(limit, 18);
-        limit.setChecked(prefs.getBoolean("wifi_now_timer", true));
-        timer.addView(limit);
-        final EditText minutes = new EditText(a);
-        minutes.setInputType(InputType.TYPE_CLASS_NUMBER);
-        minutes.setSingleLine(true);
-        minutes.setEms(3);
-        minutes.setTextColor(Ui.TEXT);
-        Ui.size(minutes, 18);
-        minutes.setText(String.valueOf(prefs.getInt("wifi_now_minutes", 30)));
-        minutes.setEnabled(limit.isChecked());
-        timer.addView(minutes);
-        Ui.text(timer, "minutes", 18, false, Ui.TEXT);
-        limit.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton b, boolean on) {
-                minutes.setEnabled(on);
-                prefs.edit().putBoolean("wifi_now_timer", on).apply();
-            }
-        });
-        LinearLayout manual = Ui.row(a);
-        page.addView(manual);
-        Ui.button(manual, "Connect now", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (!limit.isChecked()) {
-                    request("now", "0");
-                    return;
-                }
-                int m = -1;
-                try {
-                    m = Integer.parseInt(minutes.getText().toString().trim());
-                } catch (NumberFormatException e) {
-                    // left at -1: refused below
-                }
-                if (m < 1 || m > 240) {
-                    a.message("Home Wi-Fi", "Minutes: 1 to 240. Untick the box for no time limit.");
-                    return;
-                }
-                prefs.edit().putInt("wifi_now_minutes", m).apply();
-                request("now", String.valueOf(m));
-            }
-        });
-        Ui.button(manual, "Back to the car's Wi-Fi", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                request("back", null);
-            }
-        });
-        Ui.text(page, "Connect now works in P. Wireless CarPlay and Android Auto stay off until it ends: when you shift out of P, "
-                + "tap Back, the head unit restarts, or the minutes are up (with the box ticked). You can leave this app meanwhile.",
-                14, false, Ui.GREY);
+
+        Ui.gap(page, 8);
+
+        // Live connection status & session controls card
+        statusCard = Ui.column(a);
+        statusCard.setBackground(Ui.box(a, Ui.PANEL, Ui.LINE, 12));
+        int pad = Ui.dp(a, 18);
+        statusCard.setPadding(pad, Ui.dp(a, 14), pad, Ui.dp(a, 14));
+        page.addView(statusCard);
+
+        statusPillHolder = Ui.row(a);
+        statusCard.addView(statusPillHolder);
+        Ui.pill(statusPillHolder, "Checking Home Wi-Fi status…", Ui.GREY);
+
+        detailView = Ui.text(statusCard, "Loading current Wi-Fi state…", 16, false, Ui.GREY);
+        controlsHolder = Ui.column(a);
+        statusCard.addView(controlsHolder);
+
         Ui.line(page);
-        Ui.text(page, "Saved networks", 21, true, Ui.TEXT);
-        saved = Ui.column(a);
-        page.addView(saved);
-        Ui.button(page, "Add a network", new View.OnClickListener() {
+
+        // Saved Networks section
+        Ui.text(page, "Saved Networks", 22, true, Ui.TEXT);
+        savedHeaderNote = Ui.text(page,
+                "Turn off \"Use for Home Wi-Fi\" for dashcams or hotspots without internet so Home Wi-Fi ignores them "
+                + "while keeping them saved for other apps.", 15, false, Ui.GREY);
+        savedList = Ui.column(a);
+        page.addView(savedList);
+
+        Ui.line(page);
+
+        // Nearby Wi-Fi Networks section
+        nearbyTitle = Ui.text(page, "Nearby Wi-Fi Networks", 22, true, Ui.TEXT);
+        nearbyNote = Ui.text(page, "Tap \"Scan & Connect Now\" above while in Park to scan live for nearby networks.", 15, false, Ui.GREY);
+        nearbyList = Ui.column(a);
+        page.addView(nearbyList);
+
+        LinearLayout hiddenRow = Ui.row(a);
+        page.addView(hiddenRow);
+        Ui.button(hiddenRow, "Add Hidden Network…", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                add();
+                promptAddHiddenNetwork();
             }
         });
-        Ui.text(page, "Seen last time home Wi-Fi was on", 18, true, Ui.TEXT);
-        found = Ui.column(a);
-        page.addView(found);
+
         Ui.line(page);
-        Ui.text(page, "Mobile data", 21, true, Ui.TEXT);
-        Ui.text(page, "Mods never use the car's mobile data, DNS lookups included: only home Wi-Fi, for the mods that ask. "
-                + "You can let a mod use mobile data below, at your own risk (kept in hmgapi.json overrides.allow_cellular); "
-                + "it takes effect within a few seconds.", 16, false, Ui.GREY);
+
+        // Mobile Data Overrides section
+        Ui.text(page, "Mobile Data Overrides", 22, true, Ui.TEXT);
+        Ui.text(page, "By default, mods never use the car's cellular connection (including DNS lookups) and only access the "
+                + "internet over Home Wi-Fi. You can allow specific mods to use mobile data below at your own risk; changes "
+                + "take effect within a few seconds.", 16, false, Ui.GREY);
         cellular = Ui.column(a);
         page.addView(cellular);
-        loadSaved();
-        scan();
+
+        refreshNow();
+        startLivePoll();
         loadCellular();
     }
 
-    void startNowPoll() {
+    private boolean isPageVisible() {
+        return !a.isFinishing()
+                && SettingsTab.current == 2
+                && statusCard != null
+                && statusCard.getParent() != null
+                && page.getWindowToken() != null;
+    }
+
+    private void startLivePoll() {
         final Runnable tick = new Runnable() {
             @Override
             public void run() {
-                if (a.isFinishing() || nowView == null || page.getWindowToken() == null) return;
-                nowView.setText("Now: " + now());
-                page.postDelayed(this, 3000);
+                if (!isPageVisible()) return;
+                refreshNow();
+                page.postDelayed(this, POLL_INTERVAL_MS);
             }
         };
-        page.postDelayed(tick, 3000);
+        page.postDelayed(tick, POLL_INTERVAL_MS);
     }
 
-    void add() {
-        final EditText name = new EditText(a);
-        name.setHint("Network name");
-        name.setSingleLine(true);
-        new AlertDialog.Builder(a).setTitle("Add a network").setView(name)
-                .setPositiveButton("Next", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        String n = name.getText().toString().trim();
-                        if (!n.isEmpty()) join(n, false);
-                    }
-                })
-                .setNegativeButton("Cancel", null).show();
-    }
-
-    static String now() {
-        try {
-            JSONObject w = new JSONObject(UsbFolders.read(new File("/data/hmgapi/public/wifi.json")));
-            String s = w.optString("state");
-            if ("up".equals(s)) return "connected, " + w.optInt("rssi") + " dBm, " + w.optInt("freq") + " MHz";
-            if ("waiting".equals(s)) return "the car is on: home Wi-Fi waits until it's off";
-            if ("searching".equals(s)) return "the car is off: looking for a saved network";
-            if ("nonetworks".equals(s)) return "no saved networks yet";
-            if ("nolease".equals(s)) return "joined, waiting for an address";
-            if ("stock".equals(s)) return "the car's own Wi-Fi settings have the Wi-Fi";
-            if ("clash".equals(s)) return "a network uses 192.168.0.x, the car Wi-Fi's own addresses: it can't be used";
-            if ("off".equals(s)) return "off";
-            return s;
-        } catch (Exception e) {
-            return "off";
-        }
-    }
-
-    /** hmgapid wifi now [minutes] | back: home Wi-Fi on request (in P; 0 minutes: until out of P), and back */
-    void request(final String verb, final String minutes) {
+    void refreshNow() {
+        if (pollInFlight) return;
+        pollInFlight = true;
         new Ui.Job<Hmgapid.Result>() {
             @Override
             Hmgapid.Result work() throws Exception {
-                return minutes == null ? Hmgapid.call("wifi", verb) : Hmgapid.call("wifi", verb, minutes);
+                return Hmgapid.call(8000, "wifi", "status");
             }
 
             @Override
             void done(Hmgapid.Result r, Exception e) {
-                if (nowView != null) nowView.setText("Now: " + now());
-                a.message("Home Wi-Fi", e != null ? "HMG-API isn't answering." : r.output.trim());
+                pollInFlight = false;
+                if (!isPageVisible()) return;
+                if (e != null) {
+                    renderOfflineState("Cannot reach HMG-API service", Hmgapid.unreachable(e), false);
+                    return;
+                }
+                if (r.code != 0) {
+                    String msg = r.output.trim();
+                    boolean unapplied = msg.toLowerCase().contains("isn't applied yet");
+                    boolean isOff = msg.toLowerCase().contains("is off");
+                    if (unapplied) {
+                        renderOfflineState("Apply & restart required",
+                                "Home Wi-Fi has been switched on, but changes haven't been applied yet. Tap \"Apply Changes\" below, then restart the head unit.",
+                                true);
+                    } else if (isOff) {
+                        renderOfflineState("Home Wi-Fi is disabled",
+                                "Turn on \"Enable Home Wi-Fi\" above, tap \"Apply Changes\", and restart the head unit to enable automatic and manual Wi-Fi connections.",
+                                false);
+                    } else {
+                        renderOfflineState("Home Wi-Fi unavailable", msg, false);
+                    }
+                    return;
+                }
+                try {
+                    JSONObject st = new JSONObject(r.output);
+                    lastStatus = st;
+                    renderLiveStatus(st);
+                } catch (Exception parseErr) {
+                    renderOfflineState("Status unavailable", r.output.trim(), false);
+                }
             }
         }.start(a);
     }
 
-    void loadSaved() {
+    private void renderOfflineState(String headline, String detail, boolean showApplyButton) {
+        statusPillHolder.removeAllViews();
+        Ui.pill(statusPillHolder, headline, showApplyButton ? Ui.WARN : Ui.GREY);
+        detailView.setText(detail);
+        detailView.setTextColor(showApplyButton ? Ui.WARN : Ui.GREY);
+
+        String ctrlSig = "offline|" + showApplyButton;
+        if (!ctrlSig.equals(lastControlsSig)) {
+            lastControlsSig = ctrlSig;
+            controlsHolder.removeAllViews();
+            if (showApplyButton) {
+                LinearLayout r = Ui.row(a);
+                controlsHolder.addView(r);
+                Ui.button(r, "Apply Changes", true, new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        a.plan();
+                    }
+                });
+            }
+        }
+
+        String emptySig = "offline";
+        if (!emptySig.equals(lastSavedSig)) {
+            lastSavedSig = emptySig;
+            savedList.removeAllViews();
+            Ui.text(savedList, showApplyButton
+                    ? "Apply changes and restart first to manage Wi-Fi networks."
+                    : "Enable Home Wi-Fi above to view and manage Wi-Fi networks.", 16, false, Ui.GREY);
+        }
+        if (!emptySig.equals(lastNearbySig)) {
+            lastNearbySig = emptySig;
+            nearbyTitle.setText("Nearby Wi-Fi Networks");
+            nearbyNote.setText("");
+            nearbyList.removeAllViews();
+        }
+    }
+
+    private void renderLiveStatus(JSONObject st) {
+        String phase = st.optString("phase", "standby");
+        String headline = st.optString("headline", "Standby");
+        String detail = st.optString("detail", "");
+        boolean active = st.optBoolean("active", false);
+
+        int pillColor = Ui.GREY;
+        if ("connected".equals(phase)) pillColor = Ui.GREEN;
+        else if ("auth_failed".equals(phase) || "dhcp_timeout".equals(phase)) pillColor = Ui.ERROR;
+        else if (active) pillColor = Ui.WARN;
+
+        statusPillHolder.removeAllViews();
+        Ui.pill(statusPillHolder, headline, pillColor);
+        detailView.setText(detail);
+        detailView.setTextColor(("auth_failed".equals(phase) || "dhcp_timeout".equals(phase)) ? Ui.ERROR : Ui.TEXT);
+
+        renderControls(active);
+        renderSavedNetworks(st.optJSONArray("saved"));
+        renderNearbyNetworks(st.optJSONArray("nearby"), active);
+    }
+
+    private void renderControls(boolean active) {
+        String sig = active ? "active" : "standby";
+        if (sig.equals(lastControlsSig)) return;
+        lastControlsSig = sig;
+        controlsHolder.removeAllViews();
+        Ui.gap(controlsHolder, 6);
+
+        final SharedPreferences prefs = a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE);
+
+        if (!active) {
+            LinearLayout btnRow = Ui.row(a);
+            controlsHolder.addView(btnRow);
+
+            final CheckBox limitBox = new CheckBox(a);
+            final EditText minutesInput = new EditText(a);
+
+            Ui.button(btnRow, "Scan & Connect Now", true, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String minsArg = "0";
+                    if (limitBox.isChecked()) {
+                        int m = parseMinutesInput(minutesInput.getText().toString());
+                        if (m < 1 || m > 240) {
+                            a.message("Home Wi-Fi", "Enter a duration between 1 and 240 minutes, or uncheck \"Auto-disconnect after\" for no time limit while in Park.");
+                            return;
+                        }
+                        prefs.edit().putInt("wifi_now_minutes", m).apply();
+                        minsArg = String.valueOf(m);
+                    }
+                    runWifiAction("scan", minsArg, null, false);
+                }
+            });
+
+            LinearLayout timerRow = Ui.row(a);
+            controlsHolder.addView(timerRow);
+            limitBox.setText("Auto-disconnect after ");
+            limitBox.setTextColor(Ui.TEXT);
+            Ui.size(limitBox, 17);
+            limitBox.setChecked(prefs.getBoolean("wifi_now_timer", true));
+            timerRow.addView(limitBox);
+
+            minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+            minutesInput.setSingleLine(true);
+            minutesInput.setEms(3);
+            minutesInput.setTextColor(Ui.TEXT);
+            Ui.size(minutesInput, 17);
+            minutesInput.setText(String.valueOf(prefs.getInt("wifi_now_minutes", 30)));
+            minutesInput.setEnabled(limitBox.isChecked());
+            timerRow.addView(minutesInput);
+
+            Ui.text(timerRow, " minutes  (always disconnects automatically when shifted out of Park)", 16, false, Ui.GREY);
+
+            limitBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton b, boolean on) {
+                    minutesInput.setEnabled(on);
+                    prefs.edit().putBoolean("wifi_now_timer", on).apply();
+                }
+            });
+        } else {
+            LinearLayout btnRow = Ui.row(a);
+            controlsHolder.addView(btnRow);
+            Ui.button(btnRow, "Rescan Networks", true, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Toast.makeText(a, "Scanning for nearby Wi-Fi networks…", Toast.LENGTH_SHORT).show();
+                    runWifiAction("scan", "30", null, true);
+                }
+            });
+            Ui.button(btnRow, "Disconnect & Resume CarPlay / AA", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    runWifiAction("back", null, null, true);
+                }
+            });
+        }
+    }
+
+    private void renderSavedNetworks(JSONArray arr) {
+        String sig = arr == null ? "[]" : arr.toString();
+        if (sig.equals(lastSavedSig)) return;
+        lastSavedSig = sig;
+        savedList.removeAllViews();
+
+        if (arr == null || arr.length() == 0) {
+            Ui.text(savedList, "No saved Wi-Fi networks yet. Tap \"Scan & Connect Now\" above to pick a nearby network, or use \"Add Hidden Network…\" below.", 16, false, Ui.GREY);
+            return;
+        }
+
+        for (int i = 0; i < arr.length(); i++) {
+            final JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+            final String ssid = item.optString("ssid", "");
+            if (ssid.isEmpty()) continue;
+
+            final boolean open = item.optBoolean("open", false);
+            final boolean useForHome = item.optBoolean("useForHomeWifi", true);
+            final boolean dashcam = item.optBoolean("dashcam", false);
+            final boolean connected = item.optBoolean("connected", false);
+            final boolean connecting = item.optBoolean("connecting", false);
+            final boolean authFailed = item.optBoolean("authFailed", false);
+            final boolean inRange = item.optBoolean("inRange", false);
+            final int rssi = item.optInt("rssi", 0);
+            final int freq = item.optInt("freq", 0);
+            final String security = item.optString("security", open ? "Open" : "WPA2");
+
+            int border = authFailed ? Ui.ERROR : (connected ? Ui.ACCENT : Ui.LINE);
+            LinearLayout card = Ui.column(a);
+            card.setBackground(Ui.box(a, Ui.PANEL, border, 10));
+            int pad = Ui.dp(a, 16);
+            card.setPadding(pad, Ui.dp(a, 10), pad, Ui.dp(a, 10));
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            clp.setMargins(0, Ui.dp(a, 6), 0, Ui.dp(a, 6));
+            savedList.addView(card, clp);
+
+            // Top row: SSID + status subtitle on left, "Use for Home Wi-Fi" toggle on right
+            LinearLayout top = Ui.row(a);
+            card.addView(top);
+
+            LinearLayout infoCol = Ui.column(a);
+            top.addView(infoCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            String titleText = dashcam ? (ssid + "  [Dashcam]") : ssid;
+            Ui.text(infoCol, titleText, 19, true, useForHome ? Ui.TEXT : Ui.GREY);
+
+            String subText;
+            int subColor = Ui.GREY;
+            if (!useForHome) {
+                subText = "Ignored by Home Wi-Fi (profile kept saved for dashcam / other apps)";
+                subColor = Ui.GREY;
+            } else if (connected) {
+                String band = freq <= 0 ? "" : (freq < 3000 ? "2.4 GHz" : "5 GHz");
+                String ip = lastStatus != null ? lastStatus.optString("ip", "") : "";
+                subText = "Connected"
+                        + (!ip.isEmpty() ? " • " + ip : "")
+                        + (rssi != 0 ? " • " + rssi + " dBm" : "")
+                        + (!band.isEmpty() ? " • " + band : "");
+                subColor = Ui.GREEN;
+            } else if (authFailed) {
+                subText = "Incorrect Wi-Fi password — tap \"Password\" below to update it";
+                subColor = Ui.ERROR;
+            } else if (connecting) {
+                subText = "Connecting…";
+                subColor = Ui.WARN;
+            } else if (inRange) {
+                String band = freq <= 0 ? "" : (freq < 3000 ? "2.4 GHz" : "5 GHz");
+                subText = "Enabled for Home Wi-Fi • In range (" + rssi + " dBm"
+                        + (!band.isEmpty() ? ", " + band : "") + ", " + security + ")";
+                subColor = Ui.TEXT;
+            } else {
+                subText = "Enabled for Home Wi-Fi (" + security + ") • Out of range / Standby";
+                subColor = Ui.GREY;
+            }
+            Ui.text(infoCol, subText, 15, false, subColor);
+
+            LinearLayout useToggleBox = Ui.row(a);
+            top.addView(useToggleBox);
+            TextView useLbl = new TextView(a);
+            useLbl.setText("Use for Home Wi-Fi  ");
+            Ui.size(useLbl, 16);
+            useLbl.setTextColor(useForHome ? Ui.TEXT : Ui.GREY);
+            useToggleBox.addView(useLbl);
+
+            final Switch useSw = new Switch(a);
+            useSw.setChecked(useForHome);
+            useSw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton b, boolean checked) {
+                    setNetworkUseForHomeWifi(useSw, ssid, checked);
+                }
+            });
+            useToggleBox.addView(useSw);
+
+            // Bottom row: Connect / Password / Forget buttons
+            LinearLayout actions = Ui.row(a);
+            card.addView(actions);
+
+            if (useForHome && !connected) {
+                Ui.button(actions, authFailed ? "Retry Connect" : "Connect", !connecting, new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        if (authFailed) {
+                            promptPasswordAndConnect(ssid, false, true);
+                        } else {
+                            runWifiAction("connect", ssid, null, false);
+                        }
+                    }
+                });
+            }
+            if (!open) {
+                Ui.button(actions, "Password", authFailed, new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        promptPasswordAndConnect(ssid, false, true);
+                    }
+                });
+            }
+            Ui.button(actions, "Forget", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    confirmForgetNetwork(ssid, dashcam, useForHome);
+                }
+            });
+        }
+    }
+
+    private void renderNearbyNetworks(JSONArray arr, boolean active) {
+        nearbyTitle.setText(active ? "Nearby Wi-Fi Networks (Live Scan)" : "Nearby Wi-Fi Networks");
+        if (active) {
+            nearbyNote.setText(arr != null && arr.length() > 0
+                    ? "Tap \"Connect\" next to any network below to join it immediately."
+                    : "Scanning for Wi-Fi networks in range…");
+        } else {
+            nearbyNote.setText(arr != null && arr.length() > 0
+                    ? "Showing networks from the most recent scan. Tap \"Scan & Connect Now\" above in Park to scan live."
+                    : "No recent scan results yet. Shift to Park and tap \"Scan & Connect Now\" above to scan nearby Wi-Fi networks.");
+        }
+
+        String sig = (active ? "1|" : "0|") + (arr == null ? "[]" : arr.toString());
+        if (sig.equals(lastNearbySig)) return;
+        lastNearbySig = sig;
+        nearbyList.removeAllViews();
+
+        if (arr == null || arr.length() == 0) {
+            return;
+        }
+
+        for (int i = 0; i < arr.length(); i++) {
+            final JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+            final String ssid = item.optString("ssid", "");
+            if (ssid.isEmpty()) continue;
+
+            final int rssi = item.optInt("rssi", 0);
+            final String band = item.optString("band", "");
+            final String security = item.optString("security", "WPA2");
+            final boolean open = item.optBoolean("open", false);
+            final boolean supported = item.optBoolean("supported", true);
+            final boolean isSaved = item.optBoolean("saved", false);
+            final boolean useForHome = item.optBoolean("useForHomeWifi", true);
+            final boolean connected = item.optBoolean("connected", false);
+            final boolean dashcam = item.optBoolean("dashcam", false);
+
+            LinearLayout row = Ui.row(a);
+            row.setBackground(Ui.box(a, Ui.PANEL, connected ? Ui.ACCENT : Ui.LINE, 8));
+            int pad = Ui.dp(a, 14);
+            row.setPadding(pad, Ui.dp(a, 8), pad, Ui.dp(a, 8));
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rlp.setMargins(0, Ui.dp(a, 4), 0, Ui.dp(a, 4));
+            nearbyList.addView(row, rlp);
+
+            LinearLayout left = Ui.column(a);
+            row.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            Ui.text(left, ssid, 18, true, supported ? Ui.TEXT : Ui.GREY);
+            StringBuilder meta = new StringBuilder();
+            meta.append(rssi).append(" dBm");
+            if (!band.isEmpty()) meta.append(" • ").append(band);
+            meta.append(" • ").append(security);
+            if (connected) meta.append(" • Connected");
+            else if (isSaved && !useForHome) meta.append(" • Saved (Ignored by Home Wi-Fi)");
+            else if (isSaved) meta.append(" • Saved");
+            else if (dashcam) meta.append(" • Dashcam network");
+            Ui.text(left, meta.toString(), 15, false, connected ? Ui.GREEN : Ui.GREY);
+
+            if (!supported) {
+                TextView unsup = new TextView(a);
+                unsup.setText("Unsupported");
+                Ui.size(unsup, 15);
+                unsup.setTextColor(Ui.GREY);
+                row.addView(unsup);
+            } else if (connected) {
+                TextView badge = new TextView(a);
+                badge.setText("Connected");
+                Ui.size(badge, 16);
+                badge.setTextColor(Ui.GREEN);
+                row.addView(badge);
+            } else {
+                Ui.button(row, isSaved ? "Connect" : "Join", false, new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        if (isSaved && useForHome) {
+                            runWifiAction("connect", ssid, null, false);
+                        } else if (open) {
+                            runWifiAction("connect", ssid, "", false);
+                        } else {
+                            promptPasswordAndConnect(ssid, open, true);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    private void setNetworkUseForHomeWifi(final Switch sw, final String ssid, final boolean use) {
+        sw.setEnabled(false);
         new Ui.Job<Hmgapid.Result>() {
             @Override
             Hmgapid.Result work() throws Exception {
-                return Hmgapid.call("wifi", "saved");
+                return Hmgapid.call("wifi", "use", ssid, use ? "on" : "off");
             }
 
             @Override
             void done(Hmgapid.Result r, Exception e) {
-                saved.removeAllViews();
+                sw.setEnabled(true);
                 if (e != null || r.code != 0) {
-                    String msg = e != null ? "HMG-API isn't answering." : r.output.trim();
-                    boolean unapplied = msg.contains("isn't applied yet");
-                    Ui.text(saved, msg, 16, unapplied, unapplied ? Ui.WARN : Ui.GREY);
-                    if (unapplied) {
-                        Ui.button(saved, "Apply changes", true, new View.OnClickListener() {
+                    sw.setOnCheckedChangeListener(null);
+                    sw.setChecked(!use);
+                    sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                        public void onCheckedChanged(CompoundButton b, boolean checked) {
+                            setNetworkUseForHomeWifi(sw, ssid, checked);
+                        }
+                    });
+                    a.message("Home Wi-Fi", e != null ? Hmgapid.unreachable(e) : r.output.trim());
+                    return;
+                }
+                Toast.makeText(a, r.output.trim(), Toast.LENGTH_SHORT).show();
+                lastSavedSig = "";
+                lastNearbySig = "";
+                refreshNow();
+            }
+        }.start(a);
+    }
+
+    private void confirmForgetNetwork(final String ssid, boolean dashcam, boolean useForHome) {
+        String msg = (dashcam || !useForHome)
+                ? "Remove \"" + ssid + "\" completely? Deleting a dashcam network here also removes its saved profile from Android. "
+                  + "If you only want Home Wi-Fi to ignore it, leave it saved with \"Use for Home Wi-Fi\" switched off."
+                : "Remove \"" + ssid + "\" from saved Wi-Fi networks?";
+        new AlertDialog.Builder(a)
+                .setTitle("Forget " + ssid + "?")
+                .setMessage(msg)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Forget Network", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        runWifiAction("forget", ssid, null, true);
+                    }
+                })
+                .show();
+    }
+
+    private void promptPasswordAndConnect(final String ssid, final boolean open, final boolean connectNow) {
+        if (open) {
+            runWifiAction(connectNow ? "connect" : "join", ssid, "", false);
+            return;
+        }
+        checkParkedBeforeTyping(new Runnable() {
+            @Override
+            public void run() {
+                int pad = Ui.dp(a, 20);
+                LinearLayout box = Ui.column(a);
+                box.setPadding(pad, Ui.dp(a, 12), pad, Ui.dp(a, 8));
+
+                TextView hint = new TextView(a);
+                hint.setText("Enter the Wi-Fi password for \"" + ssid + "\" (8 to 63 characters):");
+                Ui.size(hint, 16);
+                hint.setTextColor(Ui.TEXT);
+                box.addView(hint);
+
+                Ui.gap(box, 8);
+
+                final EditText keyInput = new EditText(a);
+                keyInput.setSingleLine(true);
+                keyInput.setHint("Wi-Fi password");
+                keyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                Ui.size(keyInput, 18);
+                box.addView(keyInput);
+
+                final CheckBox showPass = new CheckBox(a);
+                showPass.setText("Show password");
+                Ui.size(showPass, 16);
+                showPass.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton b, boolean checked) {
+                        int pos = keyInput.getSelectionEnd();
+                        keyInput.setInputType(InputType.TYPE_CLASS_TEXT
+                                | (checked ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                                           : InputType.TYPE_TEXT_VARIATION_PASSWORD));
+                        if (pos >= 0) keyInput.setSelection(pos);
+                    }
+                });
+                box.addView(showPass);
+
+                final AlertDialog dlg = new AlertDialog.Builder(a)
+                        .setTitle("Connect to " + ssid)
+                        .setView(box)
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton(connectNow ? "Connect" : "Save", null)
+                        .create();
+                dlg.setOnShowListener(new DialogInterface.OnShowListener() {
+                    @Override
+                    public void onShow(DialogInterface di) {
+                        Button okBtn = dlg.getButton(AlertDialog.BUTTON_POSITIVE);
+                        okBtn.setOnClickListener(new View.OnClickListener() {
                             @Override
                             public void onClick(View v) {
-                                a.plan();
+                                String pass = keyInput.getText().toString();
+                                if (!isValidWpaKey(pass)) {
+                                    Toast.makeText(a, "Password must be 8 to 63 characters (or 64 hex digits).", Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                dlg.dismiss();
+                                runWifiAction(connectNow ? "connect" : "join", ssid, pass, false);
                             }
                         });
                     }
-                    return;
-                }
-                boolean any = false;
-                for (final String name : r.output.split("\n")) {
-                    if (name.trim().isEmpty()) continue;
-                    any = true;
-                    LinearLayout row = Ui.row(a);
-                    saved.addView(row);
-                    Ui.text(row, name, 18, false, Ui.TEXT);
-                    Ui.button(row, "Forget", new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            forget(name);
-                        }
-                    });
-                }
-                if (!any) Ui.text(saved, "None yet: look for networks below.", 16, false, Ui.GREY);
+                });
+                dlg.show();
             }
-        }.start(a);
+        });
     }
 
-    void scan() {
-        found.removeAllViews();
-
-        new Ui.Job<Hmgapid.Result>() {
+    private void promptAddHiddenNetwork() {
+        checkParkedBeforeTyping(new Runnable() {
             @Override
-            Hmgapid.Result work() throws Exception {
-                return Hmgapid.call("wifi", "seen");
-            }
+            public void run() {
+                int pad = Ui.dp(a, 20);
+                LinearLayout box = Ui.column(a);
+                box.setPadding(pad, Ui.dp(a, 12), pad, Ui.dp(a, 8));
 
-            @Override
-            void done(Hmgapid.Result r, Exception e) {
-                found.removeAllViews();
-                if (e != null || r.code != 0) {
-                    Ui.text(found, e != null ? "HMG-API isn't answering." : r.output.trim(), 16, false, Ui.GREY);
-                    return;
-                }
-                // strongest per name; "<MHz>\t<dBm>\t<flags>\t<name>"
-                Map<String, String[]> best = new LinkedHashMap<String, String[]>();
-                for (String l : r.output.split("\n")) {
-                    String[] f = l.split("\t", 4);
-                    if (f.length < 4 || f[3].isEmpty()) continue;
-                    String[] was = best.get(f[3]);
-                    if (was == null || Integer.parseInt(f[1]) > Integer.parseInt(was[1])) best.put(f[3], f);
-                }
-                List<String[]> list = new ArrayList<String[]>(best.values());
-                java.util.Collections.sort(list, new java.util.Comparator<String[]>() {
+                final EditText ssidInput = new EditText(a);
+                ssidInput.setSingleLine(true);
+                ssidInput.setHint("Network name (SSID)");
+                Ui.size(ssidInput, 18);
+                box.addView(ssidInput);
+
+                Ui.gap(box, 8);
+
+                final CheckBox openNetBox = new CheckBox(a);
+                openNetBox.setText("Open network (no password)");
+                Ui.size(openNetBox, 16);
+                box.addView(openNetBox);
+
+                Ui.gap(box, 6);
+
+                final EditText passInput = new EditText(a);
+                passInput.setSingleLine(true);
+                passInput.setHint("Wi-Fi password (8 to 63 characters)");
+                passInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                Ui.size(passInput, 18);
+                box.addView(passInput);
+
+                final CheckBox showPass = new CheckBox(a);
+                showPass.setText("Show password");
+                Ui.size(showPass, 16);
+                box.addView(showPass);
+
+                openNetBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
                     @Override
-                    public int compare(String[] x, String[] y) {
-                        return Integer.parseInt(y[1]) - Integer.parseInt(x[1]);
+                    public void onCheckedChanged(CompoundButton b, boolean isOpen) {
+                        passInput.setEnabled(!isOpen);
+                        showPass.setEnabled(!isOpen);
                     }
                 });
-                if (list.isEmpty()) Ui.text(found, "Nothing yet: home Wi-Fi hasn't been on (it looks while the car is off). Add a network by its name.", 16, false, Ui.GREY);
-                for (final String[] f : list) {
-                    final boolean open = !f[2].contains("WPA") && !f[2].contains("WEP");
-                    final boolean usable = !f[2].contains("WEP") && !f[2].contains("EAP");
-                    LinearLayout row = Ui.row(a);
-                    found.addView(row);
-                    int mhz = Integer.parseInt(f[0]);
-                    Ui.text(row, f[3] + "   " + f[1] + " dBm, " + (mhz < 3000 ? "2.4" : "5") + " GHz" + (open ? ", open" : ""), 18, false,
-                            usable ? Ui.TEXT : Ui.GREY);
-                    if (!usable) continue;
-                    Ui.button(row, "Join", new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            join(f[3], open);
-                        }
-                    });
-                }
+                showPass.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton b, boolean checked) {
+                        int pos = passInput.getSelectionEnd();
+                        passInput.setInputType(InputType.TYPE_CLASS_TEXT
+                                | (checked ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                                           : InputType.TYPE_TEXT_VARIATION_PASSWORD));
+                        if (pos >= 0) passInput.setSelection(pos);
+                    }
+                });
+
+                final AlertDialog dlg = new AlertDialog.Builder(a)
+                        .setTitle("Add Hidden Wi-Fi Network")
+                        .setView(box)
+                        .setNegativeButton("Cancel", null)
+                        .setNeutralButton("Save Only", null)
+                        .setPositiveButton("Save & Connect", null)
+                        .create();
+                dlg.setOnShowListener(new DialogInterface.OnShowListener() {
+                    @Override
+                    public void onShow(DialogInterface di) {
+                        View.OnClickListener handler = new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                boolean connectNow = (v == dlg.getButton(AlertDialog.BUTTON_POSITIVE));
+                                String ssid = ssidInput.getText().toString().trim();
+                                if (ssid.isEmpty() || ssid.length() > 32) {
+                                    Toast.makeText(a, "Enter a valid network name (1 to 32 characters).", Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                boolean isOpen = openNetBox.isChecked();
+                                String pass = isOpen ? "" : passInput.getText().toString();
+                                if (!isOpen && !isValidWpaKey(pass)) {
+                                    Toast.makeText(a, "Password must be 8 to 63 characters (or 64 hex digits).", Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                dlg.dismiss();
+                                runWifiAction(connectNow ? "connect" : "join", ssid, pass, false);
+                            }
+                        };
+                        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(handler);
+                        dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(handler);
+                    }
+                });
+                dlg.show();
             }
-        }.start(a);
+        });
     }
 
-    void join(final String name, final boolean open) {
-        if (open) {
-            save(name, "");
-            return;
-        }
+    private void checkParkedBeforeTyping(final Runnable onParked) {
         new Ui.Job<Hmgapid.Result>() {
             @Override
             Hmgapid.Result work() throws Exception {
-                return Hmgapid.call("vehicle", "gear.park");
+                return Hmgapid.call(4000, "vehicle", "gear.park");
             }
 
             @Override
             void done(Hmgapid.Result r, Exception e) {
                 boolean parked = e == null && r.code == 0 && r.output.trim().endsWith(" 1");
                 if (!parked) {
-                    a.message("Home Wi-Fi", "Shift to P to type a Wi-Fi key.");
+                    a.message("Shift to Park", "Shift to Park (P) before typing a Wi-Fi network name or password.");
                     return;
                 }
-                final EditText key = new EditText(a);
-                key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-                key.setHint("Key");
-                new AlertDialog.Builder(a).setTitle(name).setView(key)
-                        .setPositiveButton("Join", new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface d, int w) {
-                                save(name, key.getText().toString());
-                            }
-                        })
-                        .setNegativeButton("Cancel", null).show();
+                onParked.run();
             }
         }.start(a);
     }
 
-    void save(final String name, final String key) {
+    private void runWifiAction(final String verb, final String arg1, final String pskOrNull, final boolean quietToastOnSuccess) {
         new Ui.Job<Hmgapid.Result>() {
             @Override
             Hmgapid.Result work() throws Exception {
-                return key.isEmpty() ? Hmgapid.call("wifi", "join", name) : Hmgapid.call("wifi", "join", name, key);
+                if (arg1 == null) return Hmgapid.call("wifi", verb);
+                if (pskOrNull == null) return Hmgapid.call("wifi", verb, arg1);
+                return Hmgapid.call("wifi", verb, arg1, pskOrNull);
             }
 
             @Override
             void done(Hmgapid.Result r, Exception e) {
-                if (e != null || r.code != 0) {
-                    a.message("Home Wi-Fi", e != null ? "HMG-API isn't answering." : r.output.trim());
+                lastSavedSig = "";
+                lastNearbySig = "";
+                refreshNow();
+                if (e != null) {
+                    a.message("Home Wi-Fi", Hmgapid.unreachable(e));
                     return;
                 }
-                a.message("Home Wi-Fi", "Saved. The head unit joins it the next time the car is off in range.");
-                loadSaved();
+                String msg = r.output.trim();
+                if (r.code != 0) {
+                    a.message("Home Wi-Fi", msg.isEmpty() ? "Command failed." : msg);
+                } else if (!msg.isEmpty()) {
+                    if (quietToastOnSuccess || "connect".equals(verb) || "scan".equals(verb)) {
+                        Toast.makeText(a, msg, Toast.LENGTH_SHORT).show();
+                    } else {
+                        a.message("Home Wi-Fi", msg);
+                    }
+                }
             }
         }.start(a);
     }
 
-    void forget(final String name) {
-        new Ui.Job<Hmgapid.Result>() {
-            @Override
-            Hmgapid.Result work() throws Exception {
-                return Hmgapid.call("wifi", "forget", name);
-            }
-
-            @Override
-            void done(Hmgapid.Result r, Exception e) {
-                loadSaved();
-            }
-        }.start(a);
+    private static int parseMinutesInput(String text) {
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
-    /** Per-mod switches for hmgapi.json overrides.allow_cellular (live via Engine publish-state). */
+    private static boolean isValidWpaKey(String pass) {
+        if (pass == null) return false;
+        int len = pass.length();
+        if (len >= 8 && len <= 63) return true;
+        if (len == 64) {
+            for (int i = 0; i < 64; i++) {
+                char c = pass.charAt(i);
+                boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex) return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // ---- Per-mod Mobile Data Overrides (hmgapi.json overrides.allow_cellular) ----
+
     void loadCellular() {
         new Ui.Job<List<String[]>>() {
             @Override
@@ -395,7 +867,7 @@ final class HomeWifiPage {
                     } catch (Exception ignored) {
                     }
                     seen.add(id);
-                    rows.add(new String[] { id, name, enabled ? name : name + " (off)", allowed.contains(id) ? "1" : "0" });
+                    rows.add(new String[] { id, name, enabled ? name : name + " (disabled)", allowed.contains(id) ? "1" : "0" });
                 }
                 for (String id : allowed) {
                     if (!seen.contains(id)) rows.add(new String[] { id, id, id + " (not installed)", "1" });
@@ -407,7 +879,7 @@ final class HomeWifiPage {
             void done(List<String[]> rows, Exception e) {
                 cellular.removeAllViews();
                 if (e != null) {
-                    Ui.text(cellular, "HMG-API isn't answering.", 16, false, Ui.GREY);
+                    Ui.text(cellular, Hmgapid.unreachable(e), 16, false, Ui.GREY);
                     return;
                 }
                 if (rows.isEmpty()) {
@@ -433,8 +905,8 @@ final class HomeWifiPage {
                 }
                 new AlertDialog.Builder(a)
                         .setTitle("Allow mobile data for " + name + "?")
-                        .setMessage("Its apps and services will be able to send traffic and DNS lookups over the car's "
-                                + "cellular link, at your own risk.")
+                        .setMessage("Apps and background services in \"" + name + "\" will be allowed to send network traffic "
+                                + "and DNS queries over the car's cellular connection, at your own risk.")
                         .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface d, int w) {
@@ -447,7 +919,7 @@ final class HomeWifiPage {
                                 setCheckedQuietly(sw, id, name, false);
                             }
                         })
-                        .setPositiveButton("Allow", new DialogInterface.OnClickListener() {
+                        .setPositiveButton("Allow Mobile Data", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface d, int w) {
                                 setCellular(sw, id, name, true);
@@ -499,7 +971,7 @@ final class HomeWifiPage {
                 sw.setEnabled(true);
                 if (e != null || r.code != 0) {
                     setCheckedQuietly(sw, id, name, !allow);
-                    Toast.makeText(a, "Couldn't save it", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(a, "Could not save mobile data setting.", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 a.refreshStatus();

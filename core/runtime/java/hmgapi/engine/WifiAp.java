@@ -21,16 +21,20 @@ public final class WifiAp {
      * AP, "1" the plain hotspot, "0" it wasn't on). start <mode>: on again in that mode.
      */
     public static void main(String[] args) throws Exception {
+        System.exit(runCommand(args));
+    }
+
+    public static int runCommand(String[] args) throws Exception {
         String v = args.length > 0 ? args[0] : "";
         boolean client = "client".equals(v) && args.length == 2 && ("on".equals(args[1]) || "off".equals(args[1]));
         if (!(("restart".equals(v) || "stop".equals(v)) && args.length == 1) && !("start".equals(v) && args.length == 2) && !client) {
             System.out.println("usage: WifiAp restart | stop | start <1|2> | client on|off");
-            System.exit(2);
+            return 2;
         }
         Object b = Class.forName("android.os.ServiceManager").getMethod("getService", String.class).invoke(null, "wifi");
         if (b == null) {
             System.out.println("no Wi-Fi service");
-            System.exit(1);
+            return 1;
         }
         Class<?> i = Class.forName("android.net.wifi.IWifiManager");
         Object wifi = Class.forName("android.net.wifi.IWifiManager$Stub").getMethod("asInterface", Class.forName("android.os.IBinder")).invoke(null, b);
@@ -45,7 +49,7 @@ public final class WifiAp {
             }
             int st = (Integer) i.getMethod("getWifiEnabledState").invoke(wifi);
             System.out.println("client " + (st == 3 ? "on" : st == 1 ? "off" : "state " + st));
-            System.exit(st == (on ? 3 : 1) ? 0 : 1);
+            return st == (on ? 3 : 1) ? 0 : 1;
         }
         int state = (Integer) i.getMethod("getWifiApEnabledState").invoke(wifi);
         int mode;
@@ -63,7 +67,7 @@ public final class WifiAp {
             if (state != AP_ENABLED && state != 12) {   // 12: enabling
                 if ("stop".equals(v)) {
                     System.out.println("0");
-                    System.exit(0);
+                    return 0;
                 }
             } else {
                 set.invoke(wifi, null, false);
@@ -71,13 +75,13 @@ public final class WifiAp {
             }
             if ("stop".equals(v)) {
                 System.out.println(mode);
-                System.exit(0);
+                return 0;
             }
         }
         set.invoke(wifi, null, true);
         for (int t = 0; t < 60 && (Integer) i.getMethod("getWifiApEnabledState").invoke(wifi) != AP_ENABLED; t++) Thread.sleep(250);
         boolean up = (Integer) i.getMethod("getWifiApEnabledState").invoke(wifi) == AP_ENABLED;
         System.out.println((mode == 2 ? "projection AP" : "hotspot") + (up ? " on" : " didn't come on"));
-        System.exit(up ? 0 : 1);
+        return up ? 0 : 1;
     }
 }
