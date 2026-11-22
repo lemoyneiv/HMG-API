@@ -27,7 +27,7 @@ build() {
     printf '#!/bin/sh\n'"$CAT"' "%s/bootprop" 2>/dev/null\n' "$T/$1" > "$T/$1/getprop"
     chmod +x "$T/$1/logcat" "$T/$1/app_process" "$T/$1/getprop"
     OUT="$T/$1" sh build.sh -DNOCAPCHECK -DROOTDIR="\"$T/$1/root\"" -DSH="\"/bin/sh\"" -DLOGCAT="\"$T/$1/logcat\"" \
-        -DREBOOT="\"/bin/true\"" -DAPP_PROCESS="\"$T/$1/app_process\"" -DPACKAGES_LIST="\"$T/$1/packages.list\"" -DGETPROP="\"$T/$1/getprop\"" -DUSBROOT="\"$T/$1/usb\"" -DBOOTMARK="\"$T/$1/bootmark\"" -DSOCK_NAME="\"hmgapid-test-$1-$$\"" -DVEHICLE_SOCK="\"hmgapi-vehicle-test-$$\"" \
+        -DREBOOT="\"/bin/true\"" -DAPP_PROCESS="\"$T/$1/app_process\"" -DPACKAGES_LIST="\"$T/$1/packages.list\"" -DGETPROP="\"$T/$1/getprop\"" -DUSBROOT="\"$T/$1/usb\"" -DBOOTMARK="\"$T/$1/bootmark\"" -DSOCK_NAME="\"hmgapid-test-$1-$$\"" -DVEHICLE_SOCK="\"hmgapi-vehicle-test-$$\"" -DWIFI_SOCK="\"hmgapi-wifi-test-$$\"" \
         -DSHELL_UID="$2" >/dev/null
 }
 run() { b=$1; shift; "$T/$b/hmgapid" "$@" 2>&1; }
@@ -178,21 +178,27 @@ check "a keeper script only under its own name" "" "$(run root services hmgapi |
 has "a mod's service: its lookups in its own process (never netd's cellular DNS)" "dns=local" "$(run root service-log svc dnsmode)"
 has "HMG-API's own keepers: the system's DNS" "wifi keeper dns=." "$(run root service-log hmgapi wifi)"
 has "wpa: nobody listening" "wpa_supplicant isn't answering" "$(run root wpa "$T/no-such-socket" STATUS)"
-# wifi: the app's home Wi-Fi verbs, through the keeper's script; the key only in its environment
+# wifi: the app's home Wi-Fi verbs, through @hmgapi-wifi or state/wifi.sh; any key only in environment/socket
 mv "$S/state/wifi.sh" "$S/state/wifi.sh.keep"
-check "wifi: off without its keeper" "home Wi-Fi is off (HMG-API settings)" "$(run root wifi saved)"
+check "wifi: off without its keeper" "Home Wi-Fi is off (HMG-API settings)" "$(run root wifi saved)"
 run root allow home_wifi on >/dev/null
-check "wifi: switch on without its keeper says apply first" "home Wi-Fi isn't applied yet (tap Apply changes, then restart)" "$(run root wifi saved)"
+check "wifi: switch on without its keeper says apply first" "Home Wi-Fi isn't applied yet (tap Apply changes, then restart)" "$(run root wifi saved)"
 run root allow home_wifi off >/dev/null
 mkdir -p "$T/app/root/state"
-for d in "$S" "$T/app/root"; do printf 'echo "verb=$1 net=$2 key=$HMGAPI_WIFI_PSK args=$#"\n' > "$d/state/wifi.sh"; done
-check "wifi: join, the key in the environment" "verb=join net=Home key=sekret-key args=2" "$(run root wifi join Home sekret-key)"
-check "wifi: saved" "verb=saved net= key= args=1" "$(run root wifi saved)"
-check "wifi: the HMG-API app may" "verb=forget net=Home key= args=2" "$(run app wifi forget Home)"
+for d in "$S" "$T/app/root"; do printf 'echo "verb=$1 net=$2 arg3=$3 key=$HMGAPI_WIFI_PSK has=$HMGAPI_WIFI_HAS_PSK args=$#"\n' > "$d/state/wifi.sh"; done
+check "wifi: join, the key in the environment" "verb=join net=Home arg3= key=sekret-key has=1 args=2" "$(run root wifi join Home sekret-key)"
+check "wifi: connect with key" "verb=connect net=Home arg3= key=sekret-key has=1 args=2" "$(run app wifi connect Home sekret-key)"
+check "wifi: connect saved (no key arg)" "verb=connect net=Home arg3= key= has=0 args=2" "$(run app wifi connect Home)"
+check "wifi: use on|off (exclude dashcam)" "verb=use net=CAR_CAM_123 arg3=off key= has=0 args=3" "$(run app wifi use CAR_CAM_123 off)"
+check "wifi: use bad flag refused" 2 "$(code app wifi use CAR_CAM_123 maybe)"
+check "wifi: status" "verb=status net= arg3= key= has=0 args=1" "$(run app wifi status)"
+check "wifi: scan" "verb=scan net=15 arg3= key= has=0 args=2" "$(run app wifi scan 15)"
+check "wifi: saved" "verb=saved net= arg3= key= has=0 args=1" "$(run root wifi saved)"
+check "wifi: the HMG-API app may" "verb=forget net=Home arg3= key= has=0 args=2" "$(run app wifi forget Home)"
 check "wifi: anyone else may not" 13 "$(code other wifi saved)"
 check "wifi: unknown verb" 2 "$(code root wifi up)"
-check "wifi: now, minutes passed on" "verb=now net=20 key= args=2" "$(run app wifi now 20)"
-check "wifi: back" "verb=back net= key= args=1" "$(run app wifi back)"
+check "wifi: now, minutes passed on" "verb=now net=20 arg3= key= has=0 args=2" "$(run app wifi now 20)"
+check "wifi: back" "verb=back net= arg3= key= has=0 args=1" "$(run app wifi back)"
 has "HMG-API's network keeper runs from state/net.sh" "keeper 1a2b" "$(run root service-log hmgapi net)"
 check "... no other HMG-API script" "" "$(run root services hmgapi | awk '$2 == "netx"')"
 check "... and a mod can't run it" "" "$(st netsteal)"

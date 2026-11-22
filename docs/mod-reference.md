@@ -371,16 +371,17 @@ check for updates.
   searching, nonetworks, stock (the car's own Wi-Fi settings have the Wi-Fi), off). It never
   gives the network's name. Car events' `parked` is a good moment to start one; switching the
   car on ends it (the client goes off).
-- On request: the HMG-API app's "Connect now" (`hmgapid wifi now [minutes]`, `wifi back`)
-  switches the same way with the car on, in P only (wireless CarPlay and Android Auto are off
-  meanwhile); it ends on "back", out of P, a restart, or after the minutes (30 by default, at
-  most 240; `0`: no time limit, until out of P).
-  It's how HMG-API's updater is meant to get online later.
-- The networks: in Android's own Wi-Fi config, added and forgotten in the HMG-API app (typing
-  a key needs P; the page lists what home Wi-Fi saw while parked). Keys are never in a log or
-  Car Report.
-- The keeper: `hmgapi wifi` (`/data/hmgapi/state/wifi.sh`), its log
-  `/data/hmgapi/logs/hmgapi/wifi.log`; routing table 95, rule priority 900, mark 0x2951.
+- On request: the HMG-API app's "Scan & Connect Now" (`hmgapid wifi scan [minutes]`,
+  `wifi now [minutes]`, `wifi back`) switches the same way with the car on, in P only
+  (wireless CarPlay and Android Auto are paused meanwhile); it ends on "back", out of P, a
+  restart, or after the minutes (30 by default, at most 240; `0`: no time limit, until out
+  of P). Scanning in P works even before any network is saved.
+- The networks: managed in the HMG-API app (`/data/hmgapi/wifi/profiles.json`, synced live
+  through Android's `WifiManager`; typing a key needs P). Any saved network can have
+  "Use for Home Wi-Fi" switched off (automatic for dashcam SSIDs) so Home Wi-Fi disables it
+  in RAM without deleting the profile for dashcam apps. Keys are never in a log or Car Report.
+- The keeper: `hmgapi wifi` (`/data/hmgapi/state/wifi.sh` -> `hmgapi.wifi.HomeWifiDaemon`),
+  its log `/data/hmgapi/logs/hmgapi/wifi.log`; routing table 95, rule priority 900, mark 0x2951.
 
 ## Bluetooth Low Energy
 

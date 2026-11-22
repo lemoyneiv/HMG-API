@@ -79,6 +79,9 @@ typedef long sl;
 #ifndef VEHICLE_SOCK
 #define VEHICLE_SOCK "hmgapi-vehicle"   /* HMG-API's vehicle service (hmgapi.vehicle.Hub) */
 #endif
+#ifndef WIFI_SOCK
+#define WIFI_SOCK "hmgapi-wifi"         /* HMG-API's home Wi-Fi service (hmgapi.wifi.HomeWifiDaemon) */
+#endif
 #ifndef SHELL_UID
 #define SHELL_UID 2000
 #endif
@@ -1720,34 +1723,89 @@ static int forget_answers(int fd)
     return 0;
 }
 
-/* home Wi-Fi for HMG-API's app: wifi saved | seen | join <ssid> [key] | forget <ssid> | now [minutes] | back
- * (on request, in P; now 0: until out of P. The updater's way in later). The keeper's
- * script does it (state/wifi.sh); the key goes in its environment (HMGAPI_WIFI_PSK), never on a command
- * line, which any process on the unit can read. */
+static void put_u32(u8 *p, u32 v)
+{
+    p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24);
+}
+
+static u32 get_u32(const u8 *p)
+{
+    return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
+/* Direct IPC to @hmgapi-wifi when HomeWifiDaemon is up (<1 ms, zero shell/JVM fork); -1 if offline. */
+static int op_wifi_sock(int fd, int argc, char **argv)
+{
+    static char wbuf[4096];
+    struct sun wa;
+    int walen = sockaddr_of(&wa, WIFI_SOCK), i;
+    struct { sl sec, usec; } tv = { 10, 0 };
+    u8 hdr[8], lenb[4];
+    u32 code, rem;
+    sl s = x_socket(1, 1 | 02000000, 0);
+    if (s < 0) return -1;
+    x_setsockopt((int)s, 1 /* SOL_SOCKET */, 20 /* SO_RCVTIMEO */, &tv, sizeof tv);
+    if (x_connect(s, &wa, walen) < 0) { x_close(s); return -1; }
+    hdr[0] = 'L'; hdr[1] = 'F'; hdr[2] = 'D'; hdr[3] = '1';
+    put_u32(hdr + 4, (u32)(argc - 1));
+    if (wall((int)s, hdr, 8)) { x_close(s); return 1; }
+    for (i = 1; i < argc; i++) {
+        u32 l = (u32)slen(argv[i]);
+        put_u32(lenb, l);
+        if (wall((int)s, lenb, 4) || (l && wall((int)s, argv[i], l))) { x_close(s); return 1; }
+    }
+    if (rall((int)s, hdr, 8)) { x_close(s); return 1; }
+    code = get_u32(hdr);
+    rem = get_u32(hdr + 4);
+    if (rem > 256 * 1024) { x_close(s); return 1; }
+    while (rem > 0) {
+        u32 want = rem < sizeof wbuf ? rem : (u32)sizeof wbuf;
+        if (rall((int)s, wbuf, want)) { x_close(s); return 1; }
+        if (frame(fd, 'O', wbuf, want)) break;
+        rem -= want;
+    }
+    x_close(s);
+    return (int)code;
+}
+
+/* home Wi-Fi for HMG-API's app: wifi status | scan [minutes] | saved | seen | join <ssid> [key] |
+ * connect <ssid> [key] | use <ssid> on|off | forget <ssid> | now [minutes] | back
+ * (on request, in P; now 0: until out of P. The updater's way in later). Talks directly to
+ * @hmgapi-wifi when the Java keeper is running, or falls back to state/wifi.sh (with any key in
+ * HMGAPI_WIFI_PSK, never on a command line). */
 static int op_wifi(int fd, int argc, char **argv)
 {
     static char psk[200];
-    char *a[6], *extra[2];
+    char *a[7], *extra[3];
     unsigned long long st[16];
-    int n = 0;
+    int n = 0, has_psk, sr;
     const char *v = argv[1];
-    if (!((seq(v, "saved") && argc == 2) || (seq(v, "seen") && argc == 2) || (seq(v, "join") && (argc == 3 || argc == 4))
+    if (!((seq(v, "status") && argc == 2) || (seq(v, "scan") && argc <= 3)
+          || (seq(v, "saved") && argc == 2) || (seq(v, "seen") && argc == 2)
+          || ((seq(v, "join") || seq(v, "connect")) && (argc == 3 || argc == 4))
+          || (seq(v, "use") && argc == 4 && (seq(argv[3], "on") || seq(argv[3], "off")))
           || (seq(v, "forget") && argc == 3) || (seq(v, "now") && argc <= 3) || (seq(v, "back") && argc == 2))) {
-        say(fd, "usage: wifi saved | seen | join <network> [key] | forget <network> | now [minutes] | back\n");
+        say(fd, "usage: wifi status | scan [minutes] | saved | seen | join <network> [key] | connect <network> [key] | use <network> on|off | forget <network> | now [minutes] | back\n");
         return 2;
     }
     if (x_stat64(ROOTDIR "/state/wifi.sh", st) != 0) {
         say(fd, x_stat64(ROOTDIR "/settings/allow/home_wifi", st) == 0
-            ? "home Wi-Fi isn't applied yet (tap Apply changes, then restart)\n"
-            : "home Wi-Fi is off (HMG-API settings)\n");
+            ? "Home Wi-Fi isn't applied yet (tap Apply changes, then restart)\n"
+            : "Home Wi-Fi is off (HMG-API settings)\n");
         return 1;
     }
-    if (argc == 4 && slen(argv[3]) > 100) { say(fd, "that key is too long\n"); return 2; }
+    has_psk = (seq(v, "join") || seq(v, "connect")) && argc == 4;
+    if (has_psk && slen(argv[3]) > 100) { say(fd, "Wi-Fi password is too long\n"); return 2; }
+    sr = op_wifi_sock(fd, argc, argv);
+    if (sr >= 0) return sr;
     a[n++] = SH; a[n++] = ROOTDIR "/state/wifi.sh"; a[n++] = argv[1];
     if (argc >= 3) a[n++] = argv[2];
+    if (seq(v, "use")) a[n++] = argv[3];
     a[n] = 0;
-    path3(psk, sizeof psk, "HMGAPI_WIFI_PSK=", argc == 4 ? argv[3] : "", "");
-    extra[0] = psk; extra[1] = 0;
+    path3(psk, sizeof psk, "HMGAPI_WIFI_PSK=", has_psk ? argv[3] : "", "");
+    extra[0] = psk;
+    extra[1] = has_psk ? "HMGAPI_WIFI_HAS_PSK=1" : "HMGAPI_WIFI_HAS_PSK=0";
+    extra[2] = 0;
     n = run_env(fd, a, extra, 1);
     mset(psk, 0, sizeof psk);
     return n;

@@ -186,212 +186,34 @@ resolver clearifaceforuidrange wlan0 10072 10072" "$(cat "$F/fw/ndc.log")"
 : > "$D/settings/allow/home_wifi"
 eng publish-state
 
-# ---- the home Wi-Fi keeper, against fake tools
-X=$T/unit
-mkdir -p "$X/data/misc/wifi/sockets" "$X/data/hmgapi/public" "$X/proc/sys/kernel/random"
-echo boot-1 > "$X/proc/sys/kernel/random/boot_id"
-echo "1000.00 2000.00" > "$X/proc/uptime"
-cat > "$F/bin/hmgapid" <<'S'
-#!/bin/bash
-case $1 in
-    vehicle) v=$(cat "$FW/veh.$2" 2>/dev/null); [ -n "$v" ] && echo "$2 $v"; exit 0 ;;
-    wpa) c=$3; echo "$c" >> "$FW/wpa.log"
-        [ -f "$FW/client" ] || exit 1   # the car's client isn't running: no socket
-        case $c in
-            STATUS) cat "$FW/wpa.status" ;;
-            SIGNAL_POLL) echo "RSSI=-61" ;;
-            SCAN_RESULTS) printf 'bssid / frequency / signal level / flags / ssid\naa:aa\t2437\t-61\t[WPA2-PSK-CCMP][ESS]\tWillows\nbb:bb\t5180\t-70\t[WPA2-PSK-CCMP][ESS]\tOther\n' ;;
-            *) echo OK ;;
-        esac ;;
-esac
-S
+# ---- the home Wi-Fi keeper wrapper (wifi.sh), HomeWifiRouter, and HomeWifiControllerTest
+java -cp "$CP" hmgapi.engine.ScriptCheck core/runtime/unit-commands.txt "$D/state/wifi.sh" || fail=1
+echo "ok    wifi.sh passes ScriptCheck against unit-commands.txt"
+
 cat > "$F/bin/app_process" <<'S'
-#!/bin/bash
-# WifiAp: the hotspot ($FW/ap: its mode) and the car's own client ($FW/client)
-echo "app_process $*" >> "$FW/apps.log"
-case "$3 $4" in
-    "stop ") if [ -f "$FW/ap" ]; then cat "$FW/ap"; rm "$FW/ap"; else echo 0; fi ;;
-    "start "*) echo "$4" > "$FW/ap"; echo "hotspot on" ;;
-    "client on") : > "$FW/client"; echo running > "$FW/props/init.svc.wpa_supplicant"; echo "client on" ;;
-    "client off") rm -f "$FW/client"; echo stopped > "$FW/props/init.svc.wpa_supplicant"; echo "client off" ;;
-esac
+#!/bin/sh
+echo "app_process $* key=$HMGAPI_WIFI_PSK has=$HMGAPI_WIFI_HAS_PSK"
 S
-printf '#!/bin/sh\n:\n' > "$F/bin/chown"
-chmod +x "$F/bin/"*
-mkdir -p "$F/fw/props"
-echo 2 > "$F/fw/ap"   # the projection hotspot is up
-# the keeper's loop replaced by N keeps
-sed -e 's/^while :; do$/for _k in $(seq 1 ${KEEPS:-1}); do keep; done; exit 0/' "$D/state/wifi.sh" > "$D/state/wifi.sh.n"
-wk() { r=0; HMGAPI_TEST_ROOT=$X KEEPS=${1:-1} PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh.n" 2>&1 || r=$?
-    [ $r = 0 ] || { echo "FAIL  the keeper exited $r, after: $last" >&2; fail=1; }; }
-verb() { HMGAPI_TEST_ROOT=$X PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" "$@" 2>&1; }
-pub() { cat "$X/data/hmgapi/public/wifi.json" 2>/dev/null; }
-state() { pub | sed 's/.*"state": "\([a-z]*\)".*/\1/'; }
-NET=$X/data/misc/wifi/wpa_supplicant.conf
+chmod +x "$F/bin/app_process"
+has "wifi.sh service mode launches HomeWifiDaemon" "app_process /system/bin --nice-name=hmgapi.wifi hmgapi.wifi.HomeWifiDaemon" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" deadbeef)"
+has "wifi.sh CLI fallback forwards status" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli status" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" status)"
+has "wifi.sh CLI fallback forwards use off" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli use CAR_CAM_1 off" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" use CAR_CAM_1 off)"
+has "wifi.sh CLI fallback preserves key in env only" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli connect Home key=sekret has=1" "$(HMGAPI_WIFI_PSK=sekret HMGAPI_WIFI_HAS_PSK=1 PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" connect Home)"
 
-echo on > "$F/fw/veh.power"; echo 0 > "$F/fw/veh.parked"
-wk >/dev/null
-check "the car on: waits for parked" waiting "$(state)"
-check "... the hotspot left as it is" 2 "$(cat "$F/fw/ap")"
-echo delay_mode > "$F/fw/veh.power"; echo 1 > "$F/fw/veh.parked"
-wk >/dev/null
-check "parked with no saved networks: nothing switched" nonetworks "$(state)"
-check "... the hotspot still up" 2 "$(cat "$F/fw/ap")"
-
-# the app's verbs, on Android's own config
-cat > "$NET" <<'C'
-ctrl_interface=wlan0
-update_config=1
-p2p_disabled=1
-
-network={
-	ssid="Willows"
-	psk="secret-not-shown"
-	key_mgmt=WPA-PSK
-}
-C
-check "saved: the names" "Willows" "$(verb saved)"
-out=$(HMGAPI_WIFI_PSK=short verb join "Cascadia" || true)
-check "join: a key under 8 characters refused" "a Wi-Fi key is 8 to 63 characters" "$out"
-out=$(HMGAPI_WIFI_PSK='has"quote' verb join "Cascadia" || true)
-has "join: a key that could break the config refused" "can't be used" "$out"
-out=$(HMGAPI_WIFI_PSK= verb join 'Bad"Name' || true)
-has "join: a name that could break the config refused" "can't be used" "$out"
-check "join: saved" "saved: Cascadia" "$(HMGAPI_WIFI_PSK=cascadia-key verb join Cascadia)"
-check "... both now" "Willows
-Cascadia" "$(verb saved)"
-has "... Android's own settings kept" "p2p_disabled=1" "$(cat "$NET")"
-has "... its key in the config, nothing printed" 'psk="cascadia-key"' "$(cat "$NET")"
-HMGAPI_WIFI_PSK=new-willows-key verb join Willows >/dev/null
-check "join again: replaced, not doubled" 1 "$(grep -c 'ssid="Willows"' "$NET")"
-has "... with its new key" 'psk="new-willows-key"' "$(cat "$NET")"
-check "an open network" "saved: Cafe" "$(HMGAPI_WIFI_PSK= verb join Cafe)"
-check "forget" "forgotten: Cafe" "$(verb forget Cafe)"
-check "... gone, the others kept" "Cascadia
-Willows" "$(verb saved | sort)"
-check "seen: nothing before home Wi-Fi was on" "" "$(verb seen)"
-
-# parked: the hotspot off, the car's client on
-echo "wpa_state=SCANNING" > "$F/fw/wpa.status"
-: > "$F/fw/apps.log"
-log=$(wk)
-has "parked: switched at once" "the car off: the hotspot off, the car's Wi-Fi client on" "$log"
-check "... the hotspot off" no "$([ -f "$F/fw/ap" ] && echo yes || echo no)"
-has "... through Android's Wi-Fi service" "hmgapi.engine.WifiAp client on" "$(cat "$F/fw/apps.log")"
-check "... looking" searching "$(state)"
-out=$(HMGAPI_WIFI_PSK=some-new-key verb join Other || true)
-has "while parked and on: networks wait for the car to be on" "add networks while the car is on" "$out"
-
-# joined: the car's own traffic on mobile data, the mods that asked on home Wi-Fi
-printf 'wpa_state=COMPLETED\nfreq=2437\n' > "$F/fw/wpa.status"
-FW=$F/fw PATH=$F/bin:$PATH ip route replace default via 10.4.0.1 dev wlan0     # Android's, when Wi-Fi is default
-FW=$F/fw PATH=$F/bin:$PATH ip route replace 10.4.0.0/16 dev wlan0 proto kernel
-printf 10.10.10.100 > "$F/fw/props/dhcp.wlan0.dns1"
+# Prepare fake routing table state for HomeWifiRouter check inside HomeWifiControllerTest
 : > "$F/fw/ndc.log"
-log=$(wk)
-has "up" "home Wi-Fi up: the mods that asked go through it; the car stays on mobile data" "$log"
-check "status: up, signal, channel, no network name" '{"state": "up", "rssi": -61, "freq": 2437}' "$(pub)"
-hasnt "the car's default route back off Wi-Fi" "default via 10.4.0.1 dev wlan0 table main" "$(cat "$F/fw/ip4.route")"
-has "table 95: Wi-Fi's default" "default via 10.4.0.1 dev wlan0 table 95" "$(cat "$F/fw/ip4.route")"
-has "table 95: the subnet" "10.4.0.0/16 dev wlan0 table 95" "$(cat "$F/fw/ip4.route")"
-has "the car's own lookups on its carrier's DNS" "resolver setdefaultif rmnet0" "$(cat "$F/fw/ndc.log")"
-has "wlan0's DNS servers for the mods" "resolver setifdns wlan0  10.10.10.100" "$(cat "$F/fw/ndc.log")"
-has "a DNS server off the subnet: through the gateway" "10.10.10.100/32 via 10.4.0.1 dev wlan0 metric 1000" "$(cat "$F/fw/ip4.route")"
-check "mods' services' DNS to the home router's" "-m owner --gid-owner 2951 -p udp --dport 53 -j DNAT --to-destination 10.10.10.100
--m owner --gid-owner 2951 -p tcp --dport 53 -j DNAT --to-destination 10.10.10.100" "$(cat "$F/fw/4/nat/HMGAPI_HOMEDNS")"
-has "what it saw, for the app" "2437	-61	[WPA2-PSK-CCMP][ESS]	Willows" "$(verb seen)"
-hasnt "the key never in the log" "secret" "$log"
-FW=$F/fw PATH=$F/bin:$PATH ip route replace default via 10.4.0.1 dev wlan0   # Android puts it back (a renewal)
-wk >/dev/null
-hasnt "... taken out again" "default via 10.4.0.1 dev wlan0 table main" "$(cat "$F/fw/ip4.route")"
+: > "$F/fw/ip4.route"
+FW=$F/fw PATH=$F/bin:$PATH ip route replace default via 10.4.0.1 dev wlan0
+FW=$F/fw PATH=$F/bin:$PATH ip route replace 10.4.0.0/16 dev wlan0 proto kernel
 
-# the car on again
-echo on > "$F/fw/veh.power"; echo 0 > "$F/fw/veh.parked"
-: > "$F/fw/apps.log"
-log=$(wk)
-has "the car on: back" "back to the car's Wi-Fi (the car is on): the car's Wi-Fi client off, the hotspot back" "$log"
-check "... the projection hotspot, in its mode" 2 "$(cat "$F/fw/ap")"
-check "... client off, then the hotspot" "client off
-start 2" "$(grep -o 'client off\|start [12]' "$F/fw/apps.log")"
-check "... table 95 empty" "" "$(grep 'table 95' "$F/fw/ip4.route" || true)"
-check "... waiting again" waiting "$(state)"
-
-# the car off without parked (the screen goes dark with it): 30 s, then home Wi-Fi
-echo adm > "$F/fw/veh.power"; echo 0 > "$F/fw/veh.parked"
-echo "2000.00 2000.00" > "$X/proc/uptime"
-wk >/dev/null
-check "the car just off: not yet (a stop for a moment)" 2 "$(cat "$F/fw/ap")"
-echo "2020.00 2000.00" > "$X/proc/uptime"
-wk >/dev/null
-check "... 20 s: not yet" 2 "$(cat "$F/fw/ap")"
-echo on > "$F/fw/veh.power"; wk >/dev/null; echo adm > "$F/fw/veh.power"
-echo "2040.00 2000.00" > "$X/proc/uptime"
-wk >/dev/null
-check "on and off again: the 30 s start over" 2 "$(cat "$F/fw/ap")"
-echo "2071.00 2000.00" > "$X/proc/uptime"
-has "off 30 s: switched" "the car off: the hotspot off" "$(wk)"
-check "... the hotspot off" no "$([ -f "$F/fw/ap" ] && echo yes || echo no)"
-echo on > "$F/fw/veh.power"
-has "on again: back at once" "back to the car's Wi-Fi (the car is on): the car's Wi-Fi client off, the hotspot back" "$(wk)"
-
-# on request (the app's "Connect now"; later the updater): in P, with the car on
-echo on > "$F/fw/veh.power"; echo 0 > "$F/fw/veh.parked"; echo 0 > "$F/fw/veh.gear.park"
-wk >/dev/null
-out=$(verb now 5 || true)
-has "now: refused out of P" "shift to P first" "$out"
-echo 1 > "$F/fw/veh.gear.park"
-check "now: minutes checked" "minutes: 1 to 240, or 0 for no time limit" "$(verb now 999 || true)"
-has "now: in P" "home Wi-Fi on for 5 minutes" "$(verb now 5)"
-has "... switched on the next check" "on request: the hotspot off, the car's Wi-Fi client on" "$(wk)"
-check "... the hotspot off" no "$([ -f "$F/fw/ap" ] && echo yes || echo no)"
-wk >/dev/null
-check "... stays while the car is on, in P" no "$([ -f "$F/fw/ap" ] && echo yes || echo no)"
-echo 0 > "$F/fw/veh.gear.park"
-has "out of P: back at once" "out of P: the car's Wi-Fi client off, the hotspot back" "$(wk)"
-check "... the hotspot" 2 "$(cat "$F/fw/ap")"
-echo 1 > "$F/fw/veh.gear.park"
-verb now 1 >/dev/null; wk >/dev/null
-verb back >/dev/null
-has "back: the hotspot again" "the car's Wi-Fi client off, the hotspot back" "$(wk)"
-verb now 1 >/dev/null; wk >/dev/null
-echo "2400.00 2000.00" > "$X/proc/uptime"
-has "the time up: back" "the car's Wi-Fi client off, the hotspot back" "$(wk)"
-check "... the request gone" no "$([ -f "$X/data/hmgapi/wifi/manual" ] && echo yes || echo no)"
-has "now 030: thirty minutes, not octal" "home Wi-Fi on for 30 minutes" "$(verb now 030)"
-check "... ends 30 minutes on" "$(($(read -r u r < "$X/proc/uptime"; echo ${u%.*}) + 1800))" "$(read -r b m < "$X/data/hmgapi/wifi/manual"; echo "$m")"
-verb back >/dev/null; wk >/dev/null
-has "now 0: no time limit" "home Wi-Fi on until you shift out of P" "$(verb now 0)"
-has "... switched on" "on request: the hotspot off, the car's Wi-Fi client on" "$(wk)"
-echo "99999.00 2000.00" > "$X/proc/uptime"
-wk >/dev/null
-check "... still on hours later, in P" no "$([ -f "$F/fw/ap" ] && echo yes || echo no)"
-echo 0 > "$F/fw/veh.gear.park"
-has "... out of P: back" "out of P: the car's Wi-Fi client off, the hotspot back" "$(wk)"
-check "... the request gone" no "$([ -f "$X/data/hmgapi/wifi/manual" ] && echo yes || echo no)"
-echo 1 > "$F/fw/veh.gear.park"
-echo "2400.00 2000.00" > "$X/proc/uptime"
-mv "$NET" "$NET.keep"; check "now with no saved networks: refused" "no saved networks: add one first" "$(verb now 5 || true)"; mv "$NET.keep" "$NET"
-
-# a restart while parked: Android remembers Wi-Fi on; the hotspot comes back first
-echo delay_mode > "$F/fw/veh.power"; echo 1 > "$F/fw/veh.parked"
-wk >/dev/null
-echo boot-2 > "$X/proc/sys/kernel/random/boot_id"; echo on > "$F/fw/veh.power"; echo 0 > "$F/fw/veh.parked"
-has "after a restart: HMG-API's client from before put back to the hotspot" "after a restart while home Wi-Fi was on" "$(wk)"
-check "... the hotspot" 2 "$(cat "$F/fw/ap")"
-
-# the car's own Wi-Fi settings, not HMG-API: left alone
-echo running > "$F/fw/props/init.svc.wpa_supplicant"
-wk >/dev/null
-check "the car's own client (its settings): left alone" stock "$(state)"
-echo stopped > "$F/fw/props/init.svc.wpa_supplicant"
-
-# home Wi-Fi turned off while parked and on: the hotspot back
-echo delay_mode > "$F/fw/veh.power"; echo 1 > "$F/fw/veh.parked"
-wk >/dev/null
-: > "$F/fw/apps.log"
-verb down >/dev/null
-check "down while parked: the hotspot back" 2 "$(cat "$F/fw/ap")"
-check "... the client off" no "$([ -f "$F/fw/client" ] && echo yes || echo no)"
+javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" \
+    core/runtime/java/hmgapi/wifi/WifiSecurity.java \
+    core/runtime/java/hmgapi/wifi/WifiPlatform.java \
+    core/runtime/java/hmgapi/wifi/HomeWifiStore.java \
+    core/runtime/java/hmgapi/wifi/HomeWifiRouter.java \
+    core/runtime/java/hmgapi/wifi/HomeWifiController.java \
+    core/runtime/test/hmgapi/wifi/HomeWifiControllerTest.java
+FW=$F/fw PATH=$F/bin:$PATH java -cp "$CP" hmgapi.wifi.HomeWifiControllerTest || fail=1
 
 done=1
 [ $fail = 0 ] && echo "all home Wi-Fi checks passed"

@@ -42,6 +42,7 @@ RULES = [
     (['core/runtime/java/hmgapi/hook/*', 'core/runtime/test/hmgapi/hook/*'], ['core/runtime/hooks-test.sh', 'core/runtime/keys-test.sh', 'core/runtime/mod-dex-test.sh', 'core/runtime/local-map-test.sh', 'core/runtime/ble-test.sh'] + SDK),
     (['core/runtime/java/hmgapi/vehicle/*', 'core/runtime/test/hmgapi/vehicle/*'], ['core/runtime/commands-test.sh'] + SDK),
     (['core/runtime/java/hmgapi/ble/*', 'core/runtime/test/hmgapi/ble/*', 'core/runtime/test/ble_filter_test.c'], ['core/runtime/ble-test.sh'] + SDK),
+    (['core/runtime/java/hmgapi/wifi/*', 'core/runtime/test/hmgapi/wifi/*'], ['core/runtime/homewifi-test.sh'] + SDK),
     (['core/runtime/stubs/*'], SDK),
     (['core/runtime/*-test.sh'], []),   # a test itself: it runs (select() adds every changed test)
     (['core/hookpoints/*'], SDK),   # the SDK's points.txt and catalogue
