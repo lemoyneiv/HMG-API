@@ -197,6 +197,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
 
     public void close() {
         setSessionLocks(false, false);
+        router.awaitPendingAdbTransition(1500L);
         if (context != null && receiverRegistered) {
             try {
                 context.unregisterReceiver(wifiReceiver);
@@ -1296,6 +1297,11 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     @Override
     public void routeDown() {
         router.routeDown();
+    }
+
+    @Override
+    public boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown) {
+        return router.setAdbOverWifi(enable, wlanIp, deferTeardown);
     }
 
     @Override

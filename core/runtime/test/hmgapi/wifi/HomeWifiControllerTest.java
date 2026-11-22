@@ -50,6 +50,7 @@ public final class HomeWifiControllerTest {
         testAwayFromHomeAutoSleepAndOpenLinkPrecedence();
         testFlightLogPowerCutAndScrubbing();
         testAdmPreLatchDoorOpenAndSoftApHijackReclaim();
+        testAdbOverWifiLifecycleAndScrubbing();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -802,6 +803,92 @@ public final class HomeWifiControllerTest {
         }
     }
 
+    private static void testAdbOverWifiLifecycleAndScrubbing() throws Exception {
+        File root = Files.createTempDirectory("hw-adb-tcp").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("GarageLab", "garage-lab-secret", true, "[WPA2-PSK-CCMP][ESS]", true);
+            check("ADB over Wi-Fi defaults to false", Boolean.FALSE, Boolean.valueOf(store.isAdbOverWifi()));
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.nowMs = 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 92, false);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+
+            int ip = ipToInt(192, 168, 77, 19);
+            int gw = ipToInt(192, 168, 77, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "GarageLab", "aa:bb:cc:dd:ee:44",
+                    -53, 5180, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+
+            Map<String, Object> stDefault = Json.object(ctl.statusJson());
+            check("ADB inactive when setting is off", Boolean.FALSE, stDefault.get("adbActive"));
+            check("adbEndpoint empty when setting is off", "", stDefault.get("adbEndpoint"));
+            checkTrue("Platform ADB stayed disabled", !plat.adbEnabled);
+
+            // 1. Live toggle ON while already connected!
+            HomeWifiController.CmdResult onRes = ctl.handleCommand(Arrays.asList("adb", "on"));
+            check("wifi adb on succeeds", Integer.valueOf(0), Integer.valueOf(onRes.code));
+            checkTrue("Persisted adbOverWifi=true", new HomeWifiStore(root).isAdbOverWifi());
+            checkTrue("Platform ADB enabled immediately on live IP", plat.adbEnabled);
+            check("Platform ADB bound to wlan0 IP", "192.168.77.19", plat.adbIp);
+
+            Map<String, Object> stOn = Json.object(ctl.statusJson());
+            check("statusJson reports adbOverWifi=true", Boolean.TRUE, stOn.get("adbOverWifi"));
+            check("statusJson reports adbActive=true", Boolean.TRUE, stOn.get("adbActive"));
+            check("statusJson reports adbEndpoint", "192.168.77.19:5555", stOn.get("adbEndpoint"));
+            checkTrue("Status detail includes ADB endpoint",
+                    String.valueOf(stOn.get("detail")).contains("ADB: 192.168.77.19:5555"));
+
+            // Verify flight log scrubbing: owner log has full IP, public log redacts last octet!
+            String ownLog = store.flightLog().readOwnerTail(65536);
+            String pubLog = store.flightLog().readPublicTail(65536);
+            checkTrue("Owner log records ADB_TCP_UP with full endpoint",
+                    ownLog.contains("ADB_TCP_UP") && ownLog.contains("192.168.77.19:5555"));
+            checkTrue("Public log redacts ADB endpoint IP",
+                    pubLog.contains("ADB_TCP_UP")
+                            && pubLog.contains("192.168.77.x:5555")
+                            && !pubLog.contains("192.168.77.19"));
+
+            // 2. Live toggle OFF while connected: passes deferTeardown=true for ADB CLI callers!
+            HomeWifiController.CmdResult offRes = ctl.handleCommand(Arrays.asList("adb", "off"));
+            check("wifi adb off succeeds", Integer.valueOf(0), Integer.valueOf(offRes.code));
+            checkTrue("Platform ADB disabled", !plat.adbEnabled);
+            checkTrue("Live wifi adb off defers teardown briefly for CLI response", plat.lastAdbDeferTeardown);
+            Map<String, Object> stOff = Json.object(ctl.statusJson());
+            check("statusJson clears adbActive", Boolean.FALSE, stOff.get("adbActive"));
+            check("statusJson clears adbEndpoint", "", stOff.get("adbEndpoint"));
+            checkTrue("Detail removes ADB endpoint",
+                    !String.valueOf(stOff.get("detail")).contains("ADB:"));
+            checkTrue("Public log records ADB_TCP_DOWN",
+                    store.flightLog().readPublicTail(65536).contains("ADB_TCP_DOWN"));
+
+            // 3. Turn ON in Standby, connect automatically when parked, then IG ON tears down immediately!
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 92, false);
+            ctl.tickVehicleAndHealth();
+            ctl.handleCommand(Arrays.asList("adb", "on"));
+            checkTrue("ADB stays inactive while in Standby", !plat.adbEnabled);
+
+            plat.nowMs += 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 92, false);
+            ctl.tickVehicleAndHealth();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+            checkTrue("ADB activates automatically when Home Wi-Fi connects", plat.adbEnabled);
+
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 92, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("ADB disabled immediately on IG ON", !plat.adbEnabled);
+            checkTrue("Session teardown does NOT defer firewall close", !plat.lastAdbDeferTeardown);
+        } finally {
+            deleteRec(root);
+        }
+    }
+
     private static void testRouterWithFakeToolsIfPresent() throws Exception {
         String fw = System.getenv("FW");
         if (fw == null || fw.isEmpty()) return;
@@ -823,9 +910,55 @@ public final class HomeWifiControllerTest {
         checkTrue("Mod service UDP DNS DNAT installed", homedns.contains("-m owner --gid-owner 2951 -p udp --dport 53 -j DNAT --to-destination 10.10.10.100"));
         checkTrue("Mod service TCP DNS DNAT installed", homedns.contains("-m owner --gid-owner 2951 -p tcp --dport 53 -j DNAT --to-destination 10.10.10.100"));
 
+        // Verify HomeWifiRouter ADB over TCP firewall, source-IP policy rule 906, and volatile property lifecycle
+        boolean adbUp = router.setAdbOverWifi(true, "10.4.0.22", false);
+        checkTrue("HomeWifiRouter.setAdbOverWifi(true) succeeds", adbUp);
+        String homeadb = HomeWifiStore.readText(new File(fw, "4/filter/HMGAPI_HOMEADB")).trim();
+        check("HMGAPI_HOMEADB accepts TCP 5555 on wlan0", "-i wlan0 -p tcp --dport 5555 -j ACCEPT", homeadb);
+        String inputChain = HomeWifiStore.readText(new File(fw, "4/filter/INPUT"));
+        checkTrue("INPUT jumps to HMGAPI_HOMEADB", inputChain.contains("-j HMGAPI_HOMEADB"));
+        String ipRules = HomeWifiStore.readText(new File(fw, "ip4.rule"));
+        checkTrue("Priority 906 source-IP rule installed for adbd return traffic",
+                ipRules.contains("906:\tfrom 10.4.0.22/32 table 95"));
+        check("Volatile service.adb.tcp.port set to 5555",
+                "5555", HomeWifiStore.readText(new File(fw, "props/service.adb.tcp.port")));
+        checkTrue("NEVER touches persist.service.adb.tcp.enable (protects CarPlay/AA eth0)",
+                !new File(fw, "props/persist.service.adb.tcp.enable").exists());
+        checkTrue("NEVER touches persist.adb.tcp.port",
+                !new File(fw, "props/persist.adb.tcp.port").exists());
+        check("adbd stopped and restarted onto TCP 5555",
+                "adbd", HomeWifiStore.readText(new File(fw, "props/ctl.start")));
+
+        // Verify routeDown() tears down HMGAPI_HOMEADB, ip rule 906, and resets volatile service.adb.tcp.port=-1
         router.routeDown();
         String routesAfter = HomeWifiStore.readText(new File(fw, "ip4.route"));
         checkTrue("Table 95 flushed on routeDown", !routesAfter.contains("table 95"));
+        checkTrue("HMGAPI_HOMEADB chain removed on routeDown", !new File(fw, "4/filter/HMGAPI_HOMEADB").exists());
+        checkTrue("ip rule 906 removed on routeDown",
+                !HomeWifiStore.readText(new File(fw, "ip4.rule")).contains("906:"));
+        check("Volatile service.adb.tcp.port reset to -1 (USB-only)",
+                "-1", HomeWifiStore.readText(new File(fw, "props/service.adb.tcp.port")));
+
+        // Verify coexistence when owner ALSO has Open-HMG/hmgapi-adb Wi-Fi toggle enabled (persist.adb.tcp.port=5555)
+        new File(fw, "props").mkdirs();
+        Files.write(new File(fw, "props/persist.adb.tcp.port").toPath(), "5555".getBytes("UTF-8"));
+        Files.write(new File(fw, "props/service.adb.tcp.port").toPath(), "".getBytes("UTF-8"));
+        new File(fw, "props/ctl.stop").delete();
+        new File(fw, "props/ctl.start").delete();
+
+        router.setAdbOverWifi(true, "10.4.0.22", false);
+        checkTrue("With persist.adb.tcp.port=5555 already set, adbd is NOT bounced unnecessarily",
+                !new File(fw, "props/ctl.stop").exists());
+        checkTrue("HMGAPI_HOMEADB still installed so home LAN subnet can reach :5555",
+                new File(fw, "4/filter/HMGAPI_HOMEADB").isFile());
+
+        router.setAdbOverWifi(false, "", false);
+        check("Teardown preserves persist.adb.tcp.port=5555",
+                "5555", HomeWifiStore.readText(new File(fw, "props/persist.adb.tcp.port")));
+        check("Teardown leaves service.adb.tcp.port empty so permanent hotspot ADB stays up",
+                "", HomeWifiStore.readText(new File(fw, "props/service.adb.tcp.port")));
+        checkTrue("adbd NOT stopped when persist.adb.tcp.port=5555 is active",
+                !new File(fw, "props/ctl.stop").exists());
     }
 
     private static int ipToInt(int a, int b, int c, int d) {
@@ -875,6 +1008,9 @@ public final class HomeWifiControllerTest {
         int reconnectCalls = 0;
         int routeUpCalls = 0;
         int routeDownCalls = 0;
+        boolean adbEnabled = false;
+        String adbIp = "";
+        boolean lastAdbDeferTeardown = false;
 
         final List<NetEntry> configured = new ArrayList<NetEntry>();
         final Set<Integer> disabledInRamIds = new LinkedHashSet<Integer>();
@@ -1009,7 +1145,19 @@ public final class HomeWifiControllerTest {
         @Override public boolean disconnect() { disconnectCalls++; return true; }
         @Override public ConnectionSnapshot getConnectionSnapshot() { return conn; }
         @Override public boolean routeUp(String ip, String gateway, String dns1, String dns2) { routeUpCalls++; return true; }
-        @Override public void routeDown() { routeDownCalls++; }
+        @Override public void routeDown() { routeDownCalls++; adbEnabled = false; adbIp = ""; }
+        @Override
+        public boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown) {
+            this.lastAdbDeferTeardown = deferTeardown;
+            if (enable && HomeWifiRouter.validIpv4(wlanIp)) {
+                this.adbEnabled = true;
+                this.adbIp = wlanIp;
+                return true;
+            }
+            this.adbEnabled = false;
+            this.adbIp = "";
+            return false;
+        }
         @Override public void scheduleDelayed(String tag, long delayMs, Runnable task) { timers.put(tag, task); }
         @Override public void cancelScheduled(String tag) { timers.remove(tag); }
         @Override public void log(String line) {}

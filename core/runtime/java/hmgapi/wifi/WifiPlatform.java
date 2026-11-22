@@ -162,6 +162,7 @@ public interface WifiPlatform {
 
     boolean routeUp(String ip, String gateway, String dns1, String dns2);
     void routeDown();
+    boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown);
 
     void scheduleDelayed(String tag, long delayMs, Runnable task);
     void cancelScheduled(String tag);

@@ -189,7 +189,9 @@ public final class HomeWifiDaemon {
                 || (envPsk != null && !envPsk.isEmpty());
 
         if ("down".equals(verb)) {
-            new HomeWifiRouter().routeDown();
+            HomeWifiRouter r = new HomeWifiRouter();
+            r.routeDown();
+            r.awaitPendingAdbTransition(1500L);
             String prevBoot = store.loadActiveBootId();
             if (!prevBoot.isEmpty()) {
                 int apMode = store.loadApMode();
@@ -254,6 +256,28 @@ public final class HomeWifiDaemon {
                 store.setKeepAwakePolicy(arg1, arg2);
                 System.out.println("Updated Home Wi-Fi keep-awake (" + HomeWifiKeepAwake.labelForCode(arg1)
                         + " unplugged / " + HomeWifiKeepAwake.labelForCode(arg2) + " plugged in).");
+                return 0;
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+                return 1;
+            }
+        }
+        if ("adb".equals(verb)) {
+            if (!"on".equals(arg1) && !"off".equals(arg1)) {
+                System.out.println("usage: wifi adb on|off");
+                return 2;
+            }
+            try {
+                boolean on = "on".equals(arg1);
+                store.setAdbOverWifi(on);
+                if (!on) {
+                    HomeWifiRouter r = new HomeWifiRouter();
+                    r.setAdbOverWifi(false, "", false);
+                    r.awaitPendingAdbTransition(1500L);
+                }
+                System.out.println(on
+                        ? "ADB over TCP will turn on automatically (port 5555) whenever Home Wi-Fi connects."
+                        : "Disabled ADB over TCP on Home Wi-Fi.");
                 return 0;
             } catch (Exception e) {
                 System.out.println(e.getMessage());
@@ -331,6 +355,7 @@ public final class HomeWifiDaemon {
         }
         @Override public boolean routeUp(String ip, String gateway, String dns1, String dns2) { return false; }
         @Override public void routeDown() {}
+        @Override public boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown) { return false; }
         @Override public void scheduleDelayed(String tag, long delayMs, Runnable task) {}
         @Override public void cancelScheduled(String tag) {}
         @Override public void log(String line) {}

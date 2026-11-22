@@ -44,6 +44,8 @@ final class HomeWifiPage {
     Button keepAwakeUnpluggedBtn;
     Button keepAwakePluggedBtn;
     TextView keepAwakeLiveNote;
+    Switch adbOverWifiSw;
+    TextView adbLiveNote;
     TextView savedHeaderNote;
     LinearLayout savedList;
     TextView nearbyTitle;
@@ -52,11 +54,13 @@ final class HomeWifiPage {
     LinearLayout cellular;
 
     boolean pollInFlight = false;
+    boolean adbToggleInFlight = false;
     String lastControlsSig = "";
     String lastSavedSig = "";
     String lastNearbySig = "";
     String curKeepAwakeUnplugged = "30m";
     String curKeepAwakePlugged = "plugged";
+    boolean curAdbOverWifi = false;
     JSONObject lastStatus = null;
 
     private static final String[] UNPLUGGED_CODES = {
@@ -96,6 +100,7 @@ final class HomeWifiPage {
         SharedPreferences prefs = a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE);
         curKeepAwakeUnplugged = prefs.getString("wifi_keepawake_unplugged", "30m");
         curKeepAwakePlugged = prefs.getString("wifi_keepawake_plugged", "plugged");
+        curAdbOverWifi = prefs.getBoolean("wifi_adb_over_tcp", false);
 
         Ui.text(page, "Automatically connects to your saved Wi-Fi networks after you park and turn off the car so HMG-API "
                 + "and enabled mods can sync without using mobile data. Wireless CarPlay and Android Auto pause while Home Wi-Fi "
@@ -163,6 +168,21 @@ final class HomeWifiPage {
         });
 
         keepAwakeLiveNote = Ui.text(kaCard, "12V battery protection: 65% floor when unplugged • 55% floor when plugged in idle.", 14, false, Ui.GREY);
+
+        Ui.gap(page, 10);
+
+        LinearLayout adbCard = Ui.column(a);
+        adbCard.setBackground(Ui.box(a, Ui.PANEL, Ui.LINE, 10));
+        adbCard.setPadding(pad, Ui.dp(a, 8), pad, Ui.dp(a, 10));
+        page.addView(adbCard);
+
+        adbOverWifiSw = Ui.switchRow(adbCard, "ADB over TCP while connected (port 5555)");
+        adbOverWifiSw.setChecked(curAdbOverWifi);
+        bindAdbSwitch();
+        adbLiveNote = Ui.text(adbCard, curAdbOverWifi
+                ? "Enabled — port 5555 opens on Home Wi-Fi automatically when connected and closes on disconnect."
+                : "Off — opens TCP port 5555 only while connected to Home Wi-Fi, without breaking Wireless CarPlay / Android Auto.",
+                14, false, curAdbOverWifi ? Ui.WARN : Ui.GREY);
 
         Ui.line(page);
 
@@ -332,6 +352,7 @@ final class HomeWifiPage {
         detailView.setTextColor(("auth_failed".equals(phase) || "dhcp_timeout".equals(phase)) ? Ui.ERROR : Ui.TEXT);
 
         renderKeepAwakeStatus(st);
+        renderAdbStatus(st);
         renderControls(active);
         renderSavedNetworks(st.optJSONArray("saved"));
         renderNearbyNetworks(st.optJSONArray("nearby"), active);
@@ -381,6 +402,112 @@ final class HomeWifiPage {
             keepAwakeLiveNote.setText(sb.toString());
             keepAwakeLiveNote.setTextColor(pluggedIn ? Ui.GREEN : Ui.GREY);
         }
+    }
+
+    private void renderAdbStatus(JSONObject st) {
+        if (!adbToggleInFlight) {
+            boolean enabled = st.optBoolean("adbOverWifi", curAdbOverWifi);
+            if (enabled != curAdbOverWifi) {
+                curAdbOverWifi = enabled;
+                a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE)
+                        .edit().putBoolean("wifi_adb_over_tcp", enabled).apply();
+            }
+            if (adbOverWifiSw != null && adbOverWifiSw.isChecked() != curAdbOverWifi) {
+                setAdbCheckedQuietly(curAdbOverWifi);
+            }
+        }
+        if (adbLiveNote != null) {
+            boolean adbActive = st.optBoolean("adbActive", false);
+            String endpoint = st.optString("adbEndpoint", "");
+            if (adbActive && !endpoint.isEmpty()) {
+                adbLiveNote.setText("Active now — run: adb connect " + endpoint
+                        + " (closes automatically when Home Wi-Fi disconnects).");
+                adbLiveNote.setTextColor(Ui.GREEN);
+            } else if (curAdbOverWifi) {
+                adbLiveNote.setText("Enabled — port 5555 opens on Home Wi-Fi automatically when connected and closes on disconnect.");
+                adbLiveNote.setTextColor(Ui.WARN);
+            } else {
+                adbLiveNote.setText("Off — opens TCP port 5555 only while connected to Home Wi-Fi, without breaking Wireless CarPlay / Android Auto.");
+                adbLiveNote.setTextColor(Ui.GREY);
+            }
+        }
+    }
+
+    private void bindAdbSwitch() {
+        if (adbOverWifiSw == null) return;
+        adbOverWifiSw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (!checked) {
+                    setAdbOverWifi(false);
+                    return;
+                }
+                new AlertDialog.Builder(a)
+                        .setTitle("Enable ADB over Home Wi-Fi?")
+                        .setMessage("While connected to Home Wi-Fi, any device on that network can open a root shell via "
+                                + "adb connect <ip>:5555 without a key prompt (the Gen5W head unit's adbd has no key check).\n\n"
+                                + "Port 5555 closes and adbd returns to USB-only automatically as soon as Home Wi-Fi disconnects, "
+                                + "without affecting Wireless CarPlay or Android Auto.\n\n"
+                                + "Only enable this on trusted home networks.")
+                        .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                setAdbCheckedQuietly(false);
+                            }
+                        })
+                        .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            @Override
+                            public void onCancel(DialogInterface d) {
+                                setAdbCheckedQuietly(false);
+                            }
+                        })
+                        .setPositiveButton("Enable ADB", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                setAdbOverWifi(true);
+                            }
+                        })
+                        .show();
+            }
+        });
+    }
+
+    private void setAdbCheckedQuietly(boolean checked) {
+        if (adbOverWifiSw == null) return;
+        adbOverWifiSw.setOnCheckedChangeListener(null);
+        adbOverWifiSw.setChecked(checked);
+        bindAdbSwitch();
+    }
+
+    private void setAdbOverWifi(final boolean enable) {
+        adbToggleInFlight = true;
+        if (adbOverWifiSw != null) adbOverWifiSw.setEnabled(false);
+        new Ui.Job<Hmgapid.Result>() {
+            @Override
+            Hmgapid.Result work() throws Exception {
+                return Hmgapid.call("wifi", "adb", enable ? "on" : "off");
+            }
+
+            @Override
+            void done(Hmgapid.Result r, Exception e) {
+                adbToggleInFlight = false;
+                if (adbOverWifiSw != null) adbOverWifiSw.setEnabled(true);
+                if (e != null || r.code != 0) {
+                    setAdbCheckedQuietly(!enable);
+                    a.message("Home Wi-Fi", e != null ? Hmgapid.unreachable(e) : r.output.trim());
+                    return;
+                }
+                curAdbOverWifi = enable;
+                a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE)
+                        .edit().putBoolean("wifi_adb_over_tcp", enable).apply();
+                String msg = r.output.trim();
+                if (!msg.isEmpty()) {
+                    Toast.makeText(a, msg, Toast.LENGTH_SHORT).show();
+                }
+                lastSavedSig = "";
+                refreshNow();
+            }
+        }.start(a);
     }
 
     private void promptKeepAwakeChoice(final boolean forPluggedIn) {
@@ -543,7 +670,8 @@ final class HomeWifiPage {
     }
 
     private void renderSavedNetworks(JSONArray arr) {
-        String sig = arr == null ? "[]" : arr.toString();
+        boolean adbActive = lastStatus != null && lastStatus.optBoolean("adbActive", false);
+        String sig = (adbActive ? "adb1|" : "adb0|") + (arr == null ? "[]" : arr.toString());
         if (sig.equals(lastSavedSig)) return;
         lastSavedSig = sig;
         savedList.removeAllViews();
@@ -601,7 +729,8 @@ final class HomeWifiPage {
                 subText = "Connected"
                         + (!ip.isEmpty() ? " • " + ip : "")
                         + (rssi != 0 ? " • " + rssi + " dBm" : "")
-                        + (!band.isEmpty() ? " • " + band : "");
+                        + (!band.isEmpty() ? " • " + band : "")
+                        + (adbActive ? " • ADB :5555" : "");
                 subColor = Ui.GREEN;
             } else if (authFailed) {
                 subText = "Incorrect Wi-Fi password — tap \"Password\" below to update it";

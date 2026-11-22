@@ -1784,16 +1784,18 @@ static int op_wifi(int fd, int argc, char **argv)
           || (seq(v, "saved") && argc == 2) || (seq(v, "seen") && argc == 2)
           || ((seq(v, "join") || seq(v, "connect")) && (argc == 3 || argc == 4))
           || (seq(v, "use") && argc == 4 && (seq(argv[3], "on") || seq(argv[3], "off")))
+          || (seq(v, "adb") && argc == 3 && (seq(argv[2], "on") || seq(argv[2], "off")))
           || (seq(v, "keepawake") && argc == 4)
           || ((seq(v, "log") || seq(v, "log-usb") || seq(v, "log-clear")) && argc == 2)
           || (seq(v, "forget") && argc == 3) || (seq(v, "now") && argc <= 3) || (seq(v, "back") && argc == 2))) {
-        say(fd, "usage: wifi status | scan [minutes] | saved | seen | join <network> [key] | connect <network> [key] | use <network> on|off | keepawake <unplugged> <plugged> | forget <network> | now [minutes] | back | log | log-usb | log-clear\n");
+        say(fd, "usage: wifi status | scan [minutes] | saved | seen | join <network> [key] | connect <network> [key] | use <network> on|off | adb on|off | keepawake <unplugged> <plugged> | forget <network> | now [minutes] | back | log | log-usb | log-clear\n");
         return 2;
     }
     if (x_stat64(ROOTDIR "/state/wifi.sh", st) != 0) {
-        if (seq(v, "keepawake") || seq(v, "log") || seq(v, "log-usb") || seq(v, "log-clear")) {
+        if (seq(v, "keepawake") || seq(v, "adb") || seq(v, "log") || seq(v, "log-usb") || seq(v, "log-clear")) {
             a[n++] = APP_PROCESS; a[n++] = "/system/bin"; a[n++] = "hmgapi.wifi.HomeWifiDaemon";
             a[n++] = "cli"; a[n++] = argv[1];
+            if (seq(v, "adb")) { a[n++] = argv[2]; }
             if (seq(v, "keepawake")) { a[n++] = argv[2]; a[n++] = argv[3]; }
             a[n] = 0;
             extra[0] = "CLASSPATH=" ENGINE_JAR; extra[1] = 0;

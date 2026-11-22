@@ -92,6 +92,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private String connectedGateway = "";
     private int connectedRssi = 0;
     private int connectedFreq = 0;
+    private boolean adbTcpActive = false;
+    private String activeAdbIp = "";
 
     private String lastErrorSsid = "";
     private String lastErrorReason = "";
@@ -130,6 +132,47 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
     }
 
+    private void syncAdbOverWifiState(String reason, boolean deferTeardown) {
+        boolean want = sessionActive
+                && "connected".equals(phase)
+                && store.isAdbOverWifi()
+                && HomeWifiRouter.validIpv4(connectedIp);
+        if (want) {
+            boolean changed = !adbTcpActive || !connectedIp.equals(activeAdbIp);
+            if (platform.setAdbOverWifi(true, connectedIp, false)) {
+                adbTcpActive = true;
+                activeAdbIp = connectedIp;
+                if (changed) {
+                    String ownMsg = "endpoint=" + connectedIp + ":" + HomeWifiRouter.ADB_PORT + " reason=" + reason;
+                    String pubMsg = "endpoint=" + HomeWifiFlightLog.redactIp(connectedIp) + ":" + HomeWifiRouter.ADB_PORT
+                            + " reason=" + reason;
+                    recordFlight("ADB_TCP_UP", ownMsg, pubMsg, true);
+                    platform.log("ADB over TCP active on " + connectedIp + ":" + HomeWifiRouter.ADB_PORT);
+                }
+            }
+        } else if (adbTcpActive) {
+            adbTcpActive = false;
+            activeAdbIp = "";
+            platform.setAdbOverWifi(false, "", deferTeardown);
+            recordFlight("ADB_TCP_DOWN", "reason=" + reason, "reason=" + reason, true);
+            platform.log("Disabled ADB over TCP on Home Wi-Fi (" + reason + ")");
+        }
+    }
+
+    private void tearDownRoutesAndAdb(String reason) {
+        if (adbTcpActive) {
+            adbTcpActive = false;
+            activeAdbIp = "";
+            platform.setAdbOverWifi(false, "", false);
+            recordFlight("ADB_TCP_DOWN", "reason=" + reason, "reason=" + reason, true);
+            platform.log("Disabled ADB over TCP on Home Wi-Fi (" + reason + ")");
+        } else {
+            platform.setAdbOverWifi(false, "", false);
+        }
+        platform.routeDown();
+        store.clearLease();
+    }
+
     public synchronized void start() {
         checkBootCleanupAndTick();
     }
@@ -141,8 +184,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             exitClientSession(reason, true);
         } else {
             store.flightLog().clearSessionActive();
-            platform.routeDown();
-            store.clearLease();
+            tearDownRoutesAndAdb("shutdown");
             if (pendingApRestoreOnPowerOn) {
                 pendingApRestoreOnPowerOn = false;
                 platform.restoreSoftAp(savedApMode);
@@ -177,6 +219,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             long nowEl = platform.elapsedRealtimeMs();
             long sleepGap = nowEl - platform.uptimeMillis();
             store.flightLog().recordDaemonStart(curBoot, platform.wallEpochSec(), nowEl, sleepGap);
+            platform.setAdbOverWifi(false, "", false);
             store.clearLease();
             store.clearKeepAwakeLease();
             if (!prevBoot.isEmpty() && !prevBoot.equals(curBoot)) {
@@ -358,6 +401,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             if (!veh.isPowerOn() && (nowElapsed - lastHeartbeatMs) >= HomeWifiFlightLog.HEARTBEAT_INTERVAL_MS) {
                 lastHeartbeatMs = nowElapsed;
                 String commonTail = " rssi=" + connectedRssi
+                        + " adb=" + adbTcpActive
                         + " power=" + (veh.power.isEmpty() ? "off" : veh.power)
                         + " plugged=" + veh.pluggedIn
                         + " charging=" + veh.charging
@@ -561,8 +605,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         connectedFreq = 0;
 
         store.flightLog().clearSessionActive();
-        platform.routeDown();
-        store.clearLease();
+        tearDownRoutesAndAdb("session_end");
         store.writePublicStatus("waiting", 0, 0);
         platform.setSessionLocks(false, false);
 
@@ -1058,8 +1101,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         connectedRssi = 0;
         connectedFreq = 0;
 
-        platform.routeDown();
-        store.clearLease();
+        tearDownRoutesAndAdb("softap_reclaim");
         store.writePublicStatus(store.hasUsableHomeProfile() ? "searching" : "nonetworks", 0, 0);
 
         String msg = "trigger=" + trigger + " apOn=" + platform.isSoftApActiveOrEnabling();
@@ -1207,8 +1249,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                             "ssid=\"" + lostSsid + "\" via=supplicant",
                             "target=" + redactSsid(lostSsid) + " via=supplicant",
                             true);
-                    platform.routeDown();
-                    store.clearLease();
+                    tearDownRoutesAndAdb("link_lost");
                     connectedSsid = "";
                     connectedIp = "";
                     connectedGateway = "";
@@ -1357,10 +1398,12 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     store.writeKeepAwakeLease(curBoot, lastKeepAwakeVerdict, lastVehicle, nowEl);
                     platform.setSessionLocks(true, lastKeepAwakeVerdict.holdPower);
                 }
+                syncAdbOverWifiState("wifi_connected", false);
                 headline = "Connected to " + ssid;
                 detail = buildConnectedDetail();
                 store.writePublicStatus("up", connectedRssi, connectedFreq);
                 String upTail = " rssi=" + connectedRssi + " freq=" + connectedFreq
+                        + " adb=" + adbTcpActive
                         + " holdPower=" + lastKeepAwakeVerdict.holdPower
                         + " remSec=" + lastKeepAwakeVerdict.remainingSec;
                 recordFlight("DHCP_UP",
@@ -1431,8 +1474,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                         "ssid=\"" + lostSsid + "\" via=health sup=" + snap.supState,
                         "target=" + redactSsid(lostSsid) + " via=health sup=" + snap.supState,
                         true);
-                platform.routeDown();
-                store.clearLease();
+                tearDownRoutesAndAdb("link_lost");
                 connectedSsid = "";
                 connectedIp = "";
                 connectedGateway = "";
@@ -1453,6 +1495,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             // Re-assert split routing so ConnectivityService / DHCP renewals never keep default route in main
             platform.routeUp(connectedIp, gw, d1, d2);
             store.saveLease(gw, d1, d2, connectedIp);
+            syncAdbOverWifiState("health", false);
             connectedRssi = snap.rssiDbm;
             connectedFreq = resolveFrequency(connectedSsid, snap.freqMhz);
             detail = buildConnectedDetail();
@@ -1473,6 +1516,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
         if (!band.isEmpty()) {
             if (sb.length() > 0) sb.append(" • ");
             sb.append(band);
+        }
+        if (adbTcpActive && !connectedIp.isEmpty()) {
+            if (sb.length() > 0) sb.append(" • ");
+            sb.append("ADB: ").append(connectedIp).append(':').append(HomeWifiRouter.ADB_PORT);
         }
         if (manualActive) {
             if (sb.length() > 0) sb.append(" • ");
@@ -1516,7 +1563,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
     public synchronized CmdResult handleCommand(List<String> args) {
         if (args == null || args.isEmpty()) {
-            return new CmdResult(2, "usage: wifi status | scan [minutes] | saved | seen | join <ssid> [key] | connect <ssid> [key] | use <ssid> on|off | keepawake <unplugged> <plugged> | forget <ssid> | now [minutes] | back | log | log-usb | log-clear\n");
+            return new CmdResult(2, "usage: wifi status | scan [minutes] | saved | seen | join <ssid> [key] | connect <ssid> [key] | use <ssid> on|off | adb on|off | keepawake <unplugged> <plugged> | forget <ssid> | now [minutes] | back | log | log-usb | log-clear\n");
         }
         String verb = args.get(0);
         if ("status".equals(verb)) {
@@ -1595,6 +1642,12 @@ public final class HomeWifiController implements WifiPlatform.Events {
             boolean use = "on".equals(args.get(2));
             return cmdSetUseForHomeWifi(args.get(1), use);
         }
+        if ("adb".equals(verb) && args.size() == 2) {
+            if (!"on".equals(args.get(1)) && !"off".equals(args.get(1))) {
+                return new CmdResult(2, "usage: wifi adb on|off\n");
+            }
+            return cmdSetAdbOverWifi("on".equals(args.get(1)));
+        }
         if ("keepawake".equals(verb) && args.size() == 3) {
             return cmdSetKeepAwake(args.get(1), args.get(2));
         }
@@ -1606,6 +1659,30 @@ public final class HomeWifiController implements WifiPlatform.Events {
             return new CmdResult(0, "off\n");
         }
         return new CmdResult(2, "Unknown Home Wi-Fi command: " + verb + "\n");
+    }
+
+    private CmdResult cmdSetAdbOverWifi(boolean enable) {
+        try {
+            store.setAdbOverWifi(enable);
+            syncAdbOverWifiState(enable ? "toggle_on" : "toggle_off", !enable);
+            if (!enable && !adbTcpActive) {
+                platform.setAdbOverWifi(false, "", true);
+            }
+            if (sessionActive && "connected".equals(phase)) {
+                detail = buildConnectedDetail();
+            }
+            if (enable) {
+                if (adbTcpActive && !connectedIp.isEmpty()) {
+                    return new CmdResult(0, "ADB over TCP active on " + connectedIp + ":" + HomeWifiRouter.ADB_PORT
+                            + " (closes automatically when Home Wi-Fi disconnects).\n");
+                }
+                return new CmdResult(0, "ADB over TCP will turn on automatically (port " + HomeWifiRouter.ADB_PORT
+                        + ") whenever Home Wi-Fi connects.\n");
+            }
+            return new CmdResult(0, "Disabled ADB over TCP on Home Wi-Fi.\n");
+        } catch (IOException e) {
+            return new CmdResult(1, "Could not save ADB over Wi-Fi setting: " + e.getMessage() + "\n");
+        }
     }
 
     private CmdResult cmdSetKeepAwake(String unpluggedArg, String pluggedArg) {
@@ -1699,8 +1776,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             if (sessionActive) {
                 if (platform.getWifiState() == WifiPlatform.WIFI_STATE_ENABLED) {
                     if ("connected".equals(phase) && !clean.equalsIgnoreCase(connectedSsid)) {
-                        platform.routeDown();
-                        store.clearLease();
+                        tearDownRoutesAndAdb("switch_ssid");
                         connectedSsid = "";
                         connectedIp = "";
                     }
@@ -1741,8 +1817,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     if (net != null) platform.disableNetworkInRam(net.netId);
                     boolean wasActiveTarget = clean.equalsIgnoreCase(connectedSsid) || clean.equalsIgnoreCase(targetSsid);
                     if (wasActiveTarget) {
-                        platform.routeDown();
-                        store.clearLease();
+                        tearDownRoutesAndAdb("ssid_excluded");
                         platform.disconnect();
                         connectedSsid = "";
                         connectedIp = "";
@@ -1792,8 +1867,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 }
             }
             if (sessionActive && (clean.equalsIgnoreCase(connectedSsid) || clean.equalsIgnoreCase(targetSsid))) {
-                platform.routeDown();
-                store.clearLease();
+                tearDownRoutesAndAdb("ssid_forgot");
                 platform.disconnect();
                 connectedSsid = "";
                 connectedIp = "";
@@ -1847,6 +1921,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
         root.put("keepAwakeExtendedByOpenLink", Boolean.valueOf(lastKeepAwakeVerdict.extendedByPeer));
         root.put("keepAwakeAwayFromHome", Boolean.valueOf(lastKeepAwakeVerdict.awayFromHome));
         root.put("keepAwakeCutBy12v", Boolean.valueOf(lastKeepAwakeVerdict.cutBy12v));
+        root.put("adbOverWifi", Boolean.valueOf(store.isAdbOverWifi()));
+        root.put("adbActive", Boolean.valueOf(adbTcpActive));
+        root.put("adbEndpoint", adbTcpActive && !connectedIp.isEmpty()
+                ? (connectedIp + ":" + HomeWifiRouter.ADB_PORT) : "");
         root.put("connectedSsid", connectedSsid);
         root.put("targetSsid", targetSsid == null ? "" : targetSsid);
         root.put("ip", connectedIp);

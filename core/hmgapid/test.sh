@@ -191,6 +191,8 @@ check "wifi: connect with key" "verb=connect net=Home arg3= key=sekret-key has=1
 check "wifi: connect saved (no key arg)" "verb=connect net=Home arg3= key= has=0 args=2" "$(run app wifi connect Home)"
 check "wifi: use on|off (exclude dashcam)" "verb=use net=CAR_CAM_123 arg3=off key= has=0 args=3" "$(run app wifi use CAR_CAM_123 off)"
 check "wifi: use bad flag refused" 2 "$(code app wifi use CAR_CAM_123 maybe)"
+check "wifi: adb on|off" "verb=adb net=on arg3= key= has=0 args=2" "$(run app wifi adb on)"
+check "wifi: adb bad flag refused" 2 "$(code app wifi adb maybe)"
 check "wifi: status" "verb=status net= arg3= key= has=0 args=1" "$(run app wifi status)"
 check "wifi: scan" "verb=scan net=15 arg3= key= has=0 args=2" "$(run app wifi scan 15)"
 check "wifi: saved" "verb=saved net= arg3= key= has=0 args=1" "$(run root wifi saved)"

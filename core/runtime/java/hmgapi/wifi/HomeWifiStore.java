@@ -73,6 +73,7 @@ public final class HomeWifiStore {
     private final Map<String, Profile> profilesByLower = new LinkedHashMap<String, Profile>();
     private String keepAwakeUnplugged = HomeWifiKeepAwake.DEFAULT_UNPLUGGED;
     private String keepAwakePlugged = HomeWifiKeepAwake.DEFAULT_PLUGGED;
+    private boolean adbOverWifi = false;
 
     public HomeWifiStore(File rootDir) {
         File base = rootDir == null ? new File("/") : rootDir;
@@ -108,6 +109,17 @@ public final class HomeWifiStore {
         if (!u.equals(keepAwakeUnplugged) || !p.equals(keepAwakePlugged)) {
             keepAwakeUnplugged = u;
             keepAwakePlugged = p;
+            saveProfiles();
+        }
+    }
+
+    public synchronized boolean isAdbOverWifi() {
+        return adbOverWifi;
+    }
+
+    public synchronized void setAdbOverWifi(boolean enabled) throws IOException {
+        if (adbOverWifi != enabled) {
+            adbOverWifi = enabled;
             saveProfiles();
         }
     }
@@ -291,6 +303,7 @@ public final class HomeWifiStore {
         profilesByLower.clear();
         keepAwakeUnplugged = HomeWifiKeepAwake.DEFAULT_UNPLUGGED;
         keepAwakePlugged = HomeWifiKeepAwake.DEFAULT_PLUGGED;
+        adbOverWifi = false;
         if (!profilesFile.isFile()) return;
         try {
             Map<String, Object> root = Json.object(readText(profilesFile));
@@ -302,6 +315,7 @@ public final class HomeWifiStore {
             if (kp != null) {
                 keepAwakePlugged = HomeWifiKeepAwake.normalizePluggedCode(String.valueOf(kp));
             }
+            adbOverWifi = Boolean.TRUE.equals(root.get("adbOverWifi"));
             Object listObj = root.get("profiles");
             if (!(listObj instanceof List)) return;
             for (Object item : (List<Object>) listObj) {
@@ -355,6 +369,7 @@ public final class HomeWifiStore {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("keepAwakeUnplugged", keepAwakeUnplugged);
         root.put("keepAwakePlugged", keepAwakePlugged);
+        root.put("adbOverWifi", Boolean.valueOf(adbOverWifi));
         root.put("profiles", arr);
         writeAtomic(profilesFile, Json.write(root) + "\n", false);
     }

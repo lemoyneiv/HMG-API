@@ -199,12 +199,29 @@ has "wifi.sh service mode launches HomeWifiDaemon" "app_process /system/bin --ni
 has "wifi.sh CLI fallback forwards status" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli status" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" status)"
 has "wifi.sh CLI fallback forwards use off" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli use CAR_CAM_1 off" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" use CAR_CAM_1 off)"
 has "wifi.sh CLI fallback forwards keepawake" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli keepawake 15m plugged" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" keepawake 15m plugged)"
+has "wifi.sh CLI fallback forwards adb" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli adb on" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" adb on)"
 has "wifi.sh CLI fallback forwards log" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli log" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" log)"
 has "wifi.sh CLI fallback preserves key in env only" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli connect Home key=sekret has=1" "$(HMGAPI_WIFI_PSK=sekret HMGAPI_WIFI_HAS_PSK=1 PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" connect Home)"
+
+# Verify net.sh harmless() treats HMGAPI_HOMEADB ahead of HMGAPI_IN in INPUT as harmless (zero fight)
+printf 'chain 4 filter HMGAPI_IN 1\nipt 4 filter HMGAPI_IN -i wlan0 -s 192.168.0.0/24 -p tcp --dport 5555 -j ACCEPT\n' > "$D/state/net.rules"
+keeper once >/dev/null
+check "HMGAPI_IN installed in INPUT" "-A INPUT -j HMGAPI_IN" "$(ipt -S INPUT | grep -m1 '^-A')"
+ipt -N HMGAPI_HOMEADB
+ipt -A HMGAPI_HOMEADB -i wlan0 -p tcp --dport 5555 -j ACCEPT
+ipt -I INPUT 1 -j HMGAPI_HOMEADB
+check "net.sh treats HMGAPI_HOMEADB ahead of HMGAPI_IN as harmless (quiet)" "" "$(keeper once)"
+ipt -D INPUT -j HMGAPI_HOMEADB
+ipt -F HMGAPI_HOMEADB
+ipt -X HMGAPI_HOMEADB
+rm -f "$D/state/net.rules"
+keeper down >/dev/null
 
 # Prepare fake routing table state for HomeWifiRouter check inside HomeWifiControllerTest
 : > "$F/fw/ndc.log"
 : > "$F/fw/ip4.route"
+: > "$F/fw/ip4.rule"
+rm -rf "$F/fw/props"
 FW=$F/fw PATH=$F/bin:$PATH ip route replace default via 10.4.0.1 dev wlan0
 FW=$F/fw PATH=$F/bin:$PATH ip route replace 10.4.0.0/16 dev wlan0 proto kernel
 
