@@ -97,6 +97,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private final Set<String> pausedAutoLower = new HashSet<String>();
     private List<HomeWifiStore.SeenNetwork> liveScans = new ArrayList<HomeWifiStore.SeenNetwork>();
     private WifiPlatform.VehicleSnapshot lastVehicle = new WifiPlatform.VehicleSnapshot("on", false, false);
+    private final HomeWifiKeepAwake keepAwake = new HomeWifiKeepAwake();
+    private HomeWifiKeepAwake.Verdict lastKeepAwakeVerdict =
+            new HomeWifiKeepAwake.Verdict(false, false, false, false, false, "off", 0, 0L);
+    private boolean pendingApRestoreOnPowerOn = false;
 
     public HomeWifiController(HomeWifiStore store, WifiPlatform platform) {
         this.store = store;
@@ -113,10 +117,18 @@ public final class HomeWifiController implements WifiPlatform.Events {
         cancelAllTimers();
         platform.cancelScheduled(TAG_VEHICLE);
         if (sessionActive) {
-            exitClientSession(reason);
+            exitClientSession(reason, true);
         } else {
             platform.routeDown();
+            store.clearLease();
+            if (pendingApRestoreOnPowerOn) {
+                pendingApRestoreOnPowerOn = false;
+                platform.restoreSoftAp(savedApMode);
+                store.clearActiveBootId();
+            }
         }
+        platform.setSessionLocks(false, false);
+        store.clearKeepAwakeLease();
         phase = "off";
         headline = "Home Wi-Fi is off";
         detail = "Disabled.";
@@ -140,6 +152,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
             bootChecked = true;
             String prevBoot = store.loadActiveBootId();
             String curBoot = platform.bootId();
+            store.clearLease();
+            store.clearKeepAwakeLease();
             if (!prevBoot.isEmpty() && !prevBoot.equals(curBoot)) {
                 platform.log("Cleaning up Home Wi-Fi client state left across reboot");
                 savedApMode = store.loadApMode();
@@ -156,6 +170,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         lastVehicle = veh;
 
         long nowElapsed = platform.elapsedRealtimeMs();
+        String curBoot = platform.bootId();
         long sleepGap = nowElapsed - platform.uptimeMillis();
         if (lastSleepGapMs != Long.MIN_VALUE && (sleepGap - lastSleepGapMs) >= 3000L) {
             platform.log("System resumed from QuickBoot suspend; refreshing vehicle & Wi-Fi state");
@@ -169,6 +184,18 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
         lastSleepGapMs = sleepGap;
 
+        if (veh.isPowerOn()) {
+            keepAwake.reset();
+            lastKeepAwakeVerdict = new HomeWifiKeepAwake.Verdict(false, false, false, false, false, "off", 0, 0L);
+            store.clearKeepAwakeLease();
+            if (pendingApRestoreOnPowerOn && !sessionActive && !manualActive) {
+                pendingApRestoreOnPowerOn = false;
+                platform.restoreSoftAp(savedApMode);
+                store.clearActiveBootId();
+                platform.log("Restored SoftAP mode " + savedApMode + " on power-on after parked sleep");
+            }
+        }
+
         // Import any newly created system profiles (e.g. fitcamx dashcam SSIDs) if Wi-Fi is enabled
         if (platform.getWifiState() == WifiPlatform.WIFI_STATE_ENABLED) {
             store.mergeSystemNetworks(platform.getConfiguredNetworks());
@@ -181,35 +208,62 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 manualDeadlineMs = 0L;
                 pinnedSsid = null;
                 if (sessionActive) {
-                    exitClientSession("Shifted out of Park");
+                    exitClientSession("Shifted out of Park", true);
                 }
             } else if (manualDeadlineMs > 0 && nowElapsed >= manualDeadlineMs) {
                 manualActive = false;
                 manualDeadlineMs = 0L;
                 pinnedSsid = null;
                 if (sessionActive && veh.isPowerOn()) {
-                    exitClientSession("Manual session timer ended");
+                    exitClientSession("Manual session timer ended", true);
                 }
             }
         }
 
         boolean offLong = evaluateOffLong(veh, nowElapsed);
+        boolean hasHomeProfile = store.hasUsableHomeProfile();
+
+        if (!veh.isPowerOn() && offLong) {
+            String ownUnplugged = hasHomeProfile ? store.getKeepAwakeUnplugged() : "off";
+            String ownPlugged = hasHomeProfile ? store.getKeepAwakePlugged() : "off";
+            lastKeepAwakeVerdict = keepAwake.evaluate(
+                    veh,
+                    nowElapsed,
+                    curBoot,
+                    ownUnplugged,
+                    ownPlugged,
+                    store.readPeerOpenLinkLease());
+            store.writeKeepAwakeLease(curBoot, lastKeepAwakeVerdict, veh, nowElapsed);
+        } else if (!veh.isPowerOn()) {
+            lastKeepAwakeVerdict = new HomeWifiKeepAwake.Verdict(false, true, false, false, false, "off", 0, 0L);
+        }
 
         if (sessionActive) {
             if (veh.isPowerOn() && !manualActive) {
                 pinnedSsid = null;
-                exitClientSession("Car switched on");
+                exitClientSession("Car switched on", true);
                 scheduleVehicleTick();
                 return;
             }
+            if (!veh.isPowerOn() && !manualActive && !lastKeepAwakeVerdict.shouldStayInClientMode) {
+                pinnedSsid = null;
+                String endWhy = lastKeepAwakeVerdict.cutBy12v
+                        ? "12V battery protection floor reached"
+                        : "Parked keep-awake timer ended";
+                exitClientSession(endWhy, false);
+                scheduleVehicleTick();
+                return;
+            }
+            platform.setSessionLocks(true, !veh.isPowerOn() && lastKeepAwakeVerdict.holdPower);
             maintainActiveSession();
             scheduleVehicleTick();
             return;
         }
 
         // Not currently in a Home Wi-Fi session
-        if (!manualActive && platform.getWifiState() == WifiPlatform.WIFI_STATE_ENABLED) {
+        if (!manualActive && platform.getWifiState() == WifiPlatform.WIFI_STATE_ENABLED && !pendingApRestoreOnPowerOn) {
             // Stock Wi-Fi Settings or Tilepad turned Wi-Fi on independently: leave it alone
+            platform.setSessionLocks(false, false);
             phase = "stock";
             headline = "Managed by system Wi-Fi settings";
             detail = "The head unit's built-in Wi-Fi settings currently control Wi-Fi.";
@@ -220,14 +274,30 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         if (manualActive && veh.gearPark) {
             enterClientSession("Manual session in Park");
+            platform.setSessionLocks(true, false);
             scheduleVehicleTick();
             return;
         }
 
         if (offLong) {
-            if (store.hasUsableHomeProfile()) {
-                enterClientSession("Car parked / powered off");
+            if (hasHomeProfile) {
+                if (lastKeepAwakeVerdict.shouldStayInClientMode) {
+                    enterClientSession("Car parked / powered off");
+                    platform.setSessionLocks(true, lastKeepAwakeVerdict.holdPower);
+                } else {
+                    platform.setSessionLocks(false, false);
+                    phase = "sleep";
+                    if (lastKeepAwakeVerdict.cutBy12v) {
+                        headline = "Paused (12V battery protection)";
+                        detail = "Home Wi-Fi disconnected early to protect the 12V battery.";
+                    } else {
+                        headline = "Parked keep-awake ended";
+                        detail = "Home Wi-Fi completed its parked keep-awake window and is ready to sleep.";
+                    }
+                    store.writePublicStatus("waiting", 0, 0);
+                }
             } else {
+                platform.setSessionLocks(false, false);
                 phase = "no_networks";
                 headline = "No Home Wi-Fi networks enabled";
                 detail = "Add a Wi-Fi network (or enable Use for Home Wi-Fi on a saved network) so the car can connect when parked.";
@@ -237,10 +307,11 @@ public final class HomeWifiController implements WifiPlatform.Events {
             return;
         }
 
+        platform.setSessionLocks(false, false);
         phase = "standby";
         headline = "Standby (Car is on)";
-        if (store.hasUsableHomeProfile()) {
-            detail = "Wireless CarPlay / Android Auto is active. Home Wi-Fi connects automatically 30 seconds after you turn off the car, or tap \"Scan & Connect Now\" in Park.";
+        if (hasHomeProfile) {
+            detail = "Wireless CarPlay / Android Auto is active. Home Wi-Fi connects automatically when parked, or tap \"Scan & Connect Now\" in Park.";
         } else {
             detail = "No Home Wi-Fi network set up yet. Shift to Park and tap \"Scan & Connect Now\" to choose your network.";
         }
@@ -284,37 +355,45 @@ public final class HomeWifiController implements WifiPlatform.Events {
         pausedAutoLower.clear();
         cancelAllTimers();
 
-        boolean apOn = platform.isSoftApActiveOrEnabling();
-        int mode = platform.getSoftApMode();
-        if (mode != 1 && mode != 2) mode = 2;
-        savedApMode = apOn ? mode : 2;
-        platform.captureSoftApConfig();
-        store.saveApMode(savedApMode);
-        store.saveActiveBootId(platform.bootId());
-
-        platform.log("Starting Home Wi-Fi (" + reason + "; prior SoftAP=" + (apOn ? ("mode " + savedApMode) : "off") + ")");
-
-        if (apOn) {
-            phase = "disabling_ap";
-            headline = "Preparing Wi-Fi…";
-            detail = "Pausing wireless CarPlay / Android Auto hotspot…";
-            store.writePublicStatus(store.hasUsableHomeProfile() ? "searching" : "nonetworks", 0, 0);
-            platform.disableSoftAp(savedApMode);
-            platform.scheduleDelayed(TAG_AP_FALLBACK, AP_DISABLE_FALLBACK_MS, new Runnable() {
-                @Override
-                public void run() {
-                    synchronized (HomeWifiController.this) {
-                        if (!sessionActive || !"disabling_ap".equals(phase)) return;
-                        enableStationHardware();
+        if (!pendingApRestoreOnPowerOn) {
+            boolean apOn = platform.isSoftApActiveOrEnabling();
+            int mode = platform.getSoftApMode();
+            if (mode != 1 && mode != 2) mode = 2;
+            savedApMode = apOn ? mode : 2;
+            platform.captureSoftApConfig();
+            store.saveApMode(savedApMode);
+            store.saveActiveBootId(platform.bootId());
+            platform.log("Starting Home Wi-Fi (" + reason + "; prior SoftAP=" + (apOn ? ("mode " + savedApMode) : "off") + ")");
+            if (apOn) {
+                phase = "disabling_ap";
+                headline = "Preparing Wi-Fi…";
+                detail = "Pausing wireless CarPlay / Android Auto hotspot…";
+                store.writePublicStatus(store.hasUsableHomeProfile() ? "searching" : "nonetworks", 0, 0);
+                platform.disableSoftAp(savedApMode);
+                platform.scheduleDelayed(TAG_AP_FALLBACK, AP_DISABLE_FALLBACK_MS, new Runnable() {
+                    @Override
+                    public void run() {
+                        synchronized (HomeWifiController.this) {
+                            if (!sessionActive || !"disabling_ap".equals(phase)) return;
+                            enableStationHardware();
+                        }
                     }
-                }
-            });
+                });
+                return;
+            }
         } else {
-            enableStationHardware();
+            pendingApRestoreOnPowerOn = false;
+            store.saveActiveBootId(platform.bootId());
+            platform.log("Resuming Home Wi-Fi (" + reason + ")");
         }
+        enableStationHardware();
     }
 
     private void exitClientSession(String reason) {
+        exitClientSession(reason, true);
+    }
+
+    private void exitClientSession(String reason, boolean restoreApNow) {
         cancelAllTimers();
         sessionActive = false;
         isConnectingToTarget = false;
@@ -330,14 +409,31 @@ public final class HomeWifiController implements WifiPlatform.Events {
         connectedFreq = 0;
 
         platform.routeDown();
-        platform.restoreSoftAp(savedApMode);
-        store.clearActiveBootId();
-        platform.log("Stopped Home Wi-Fi (" + reason
-                + (prevConnected.isEmpty() ? "" : "; was connected") + "); restored SoftAP mode " + savedApMode);
+        store.clearLease();
+        platform.setSessionLocks(false, false);
 
-        phase = "standby";
-        headline = "Standby (Car is on)";
-        detail = "Wireless CarPlay / Android Auto has been restored.";
+        if (restoreApNow) {
+            pendingApRestoreOnPowerOn = false;
+            platform.restoreSoftAp(savedApMode);
+            store.clearActiveBootId();
+            platform.log("Stopped Home Wi-Fi (" + reason
+                    + (prevConnected.isEmpty() ? "" : "; was connected") + "); restored SoftAP mode " + savedApMode);
+            phase = "standby";
+            headline = "Standby (Car is on)";
+            detail = "Wireless CarPlay / Android Auto has been restored.";
+        } else {
+            // Car is still OFF at end of keep-awake: turn off client Wi-Fi cleanly without
+            // spinning up 5 GHz SoftAP right before head-unit sleep; restore SoftAP on next IG ON!
+            pendingApRestoreOnPowerOn = true;
+            platform.stopClientWifiOnly();
+            platform.log("Stopped Home Wi-Fi for parked sleep (" + reason
+                    + (prevConnected.isEmpty() ? "" : "; was connected") + "); SoftAP restore deferred to power-on");
+            phase = "sleep";
+            headline = lastKeepAwakeVerdict.cutBy12v ? "Paused (12V battery protection)" : "Parked keep-awake ended";
+            detail = lastKeepAwakeVerdict.cutBy12v
+                    ? "Home Wi-Fi disconnected early to protect the 12V battery."
+                    : "Home Wi-Fi completed its parked keep-awake window and is ready to sleep.";
+        }
         store.writePublicStatus("waiting", 0, 0);
     }
 
@@ -856,6 +952,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 if ("connected".equals(phase)) {
                     platform.log("Home Wi-Fi link lost; tearing down routes and searching");
                     platform.routeDown();
+                    store.clearLease();
                     connectedSsid = "";
                     connectedIp = "";
                     connectedGateway = "";
@@ -983,6 +1080,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     lastErrorReason = "";
                 }
                 store.recordConnectedNow(ssid, platform.wallEpochSec());
+                store.saveLease(gw, d1, d2, myIp);
                 phase = "connected";
                 headline = "Connected to " + ssid;
                 detail = buildConnectedDetail();
@@ -1032,6 +1130,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     || (!WifiSecurity.isPlaceholderSsid(snap.ssid) && !snap.ssid.equalsIgnoreCase(connectedSsid))) {
                 platform.log("Home Wi-Fi connection dropped; returning to scan");
                 platform.routeDown();
+                store.clearLease();
                 connectedSsid = "";
                 connectedIp = "";
                 connectedGateway = "";
@@ -1051,6 +1150,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             String d2 = snap.dhcpDns2 != 0 ? WifiSecurity.intToIp(snap.dhcpDns2) : "";
             // Re-assert split routing so ConnectivityService / DHCP renewals never keep default route in main
             platform.routeUp(connectedIp, gw, d1, d2);
+            store.saveLease(gw, d1, d2, connectedIp);
             connectedRssi = snap.rssiDbm;
             connectedFreq = resolveFrequency(connectedSsid, snap.freqMhz);
             detail = buildConnectedDetail();
@@ -1081,6 +1181,14 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 int mins = Math.max(1, (remSec + 59) / 60);
                 sb.append("Active for ").append(mins).append(" min (or until out of Park)");
             }
+        } else if (!lastVehicle.isPowerOn() && lastKeepAwakeVerdict.holdPower) {
+            if (sb.length() > 0) sb.append(" • ");
+            if (lastKeepAwakeVerdict.unlimited) {
+                sb.append("Keeping awake while plugged in");
+            } else {
+                int mins = Math.max(1, (lastKeepAwakeVerdict.remainingSec + 59) / 60);
+                sb.append("Keeping awake: ").append(mins).append(" min left");
+            }
         }
         return sb.toString();
     }
@@ -1106,7 +1214,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
     public synchronized CmdResult handleCommand(List<String> args) {
         if (args == null || args.isEmpty()) {
-            return new CmdResult(2, "usage: wifi status | scan [minutes] | saved | seen | join <ssid> [key] | connect <ssid> [key] | use <ssid> on|off | forget <ssid> | now [minutes] | back\n");
+            return new CmdResult(2, "usage: wifi status | scan [minutes] | saved | seen | join <ssid> [key] | connect <ssid> [key] | use <ssid> on|off | keepawake <unplugged> <plugged> | forget <ssid> | now [minutes] | back\n");
         }
         String verb = args.get(0);
         if ("status".equals(verb)) {
@@ -1139,7 +1247,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             WifiPlatform.VehicleSnapshot veh = platform.readVehicle();
             lastVehicle = veh;
             if (sessionActive && veh.isPowerOn()) {
-                exitClientSession("Manual disconnect");
+                exitClientSession("Manual disconnect", true);
             }
             return new CmdResult(0, "Disconnected Home Wi-Fi and restored wireless CarPlay / Android Auto.\n");
         }
@@ -1159,6 +1267,9 @@ public final class HomeWifiController implements WifiPlatform.Events {
             boolean use = "on".equals(args.get(2));
             return cmdSetUseForHomeWifi(args.get(1), use);
         }
+        if ("keepawake".equals(verb) && args.size() == 3) {
+            return cmdSetKeepAwake(args.get(1), args.get(2));
+        }
         if ("forget".equals(verb) && args.size() == 2) {
             return cmdForget(args.get(1));
         }
@@ -1167,6 +1278,22 @@ public final class HomeWifiController implements WifiPlatform.Events {
             return new CmdResult(0, "off\n");
         }
         return new CmdResult(2, "Unknown Home Wi-Fi command: " + verb + "\n");
+    }
+
+    private CmdResult cmdSetKeepAwake(String unpluggedArg, String pluggedArg) {
+        if (!HomeWifiKeepAwake.isValidUnpluggedCode(unpluggedArg)
+                || !HomeWifiKeepAwake.isValidPluggedCode(pluggedArg)) {
+            return new CmdResult(2, "Invalid keep-awake duration.\n");
+        }
+        try {
+            store.setKeepAwakePolicy(unpluggedArg, pluggedArg);
+            tickVehicleAndHealth();
+            return new CmdResult(0, "Updated Home Wi-Fi keep-awake ("
+                    + HomeWifiKeepAwake.labelForCode(store.getKeepAwakeUnplugged()) + " unplugged / "
+                    + HomeWifiKeepAwake.labelForCode(store.getKeepAwakePlugged()) + " plugged in).\n");
+        } catch (IOException e) {
+            return new CmdResult(1, "Could not save keep-awake settings: " + e.getMessage() + "\n");
+        }
     }
 
     private CmdResult cmdActivateOrScan(String minArg, boolean explicitScan) {
@@ -1245,6 +1372,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 if (platform.getWifiState() == WifiPlatform.WIFI_STATE_ENABLED) {
                     if ("connected".equals(phase) && !clean.equalsIgnoreCase(connectedSsid)) {
                         platform.routeDown();
+                        store.clearLease();
                         connectedSsid = "";
                         connectedIp = "";
                     }
@@ -1286,6 +1414,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     boolean wasActiveTarget = clean.equalsIgnoreCase(connectedSsid) || clean.equalsIgnoreCase(targetSsid);
                     if (wasActiveTarget) {
                         platform.routeDown();
+                        store.clearLease();
                         platform.disconnect();
                         connectedSsid = "";
                         connectedIp = "";
@@ -1336,6 +1465,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             }
             if (sessionActive && (clean.equalsIgnoreCase(connectedSsid) || clean.equalsIgnoreCase(targetSsid))) {
                 platform.routeDown();
+                store.clearLease();
                 platform.disconnect();
                 connectedSsid = "";
                 connectedIp = "";
@@ -1378,6 +1508,16 @@ public final class HomeWifiController implements WifiPlatform.Events {
         root.put("manualRemainingSec", Integer.valueOf(manualRemainingSeconds()));
         root.put("inPark", Boolean.valueOf(lastVehicle.gearPark));
         root.put("powerOn", Boolean.valueOf(lastVehicle.isPowerOn()));
+        root.put("pluggedIn", Boolean.valueOf(lastVehicle.pluggedIn));
+        root.put("charging", Boolean.valueOf(lastVehicle.charging));
+        root.put("bat12vSoc", Integer.valueOf(lastVehicle.bat12vSoc));
+        root.put("keepAwakeUnplugged", store.getKeepAwakeUnplugged());
+        root.put("keepAwakePlugged", store.getKeepAwakePlugged());
+        root.put("keepAwakeActive", Boolean.valueOf(lastKeepAwakeVerdict.holdPower));
+        root.put("keepAwakeUnlimited", Boolean.valueOf(lastKeepAwakeVerdict.unlimited));
+        root.put("keepAwakeRemainingSec", Integer.valueOf(lastKeepAwakeVerdict.remainingSec));
+        root.put("keepAwakeExtendedByOpenLink", Boolean.valueOf(lastKeepAwakeVerdict.extendedByPeer));
+        root.put("keepAwakeCutBy12v", Boolean.valueOf(lastKeepAwakeVerdict.cutBy12v));
         root.put("connectedSsid", connectedSsid);
         root.put("targetSsid", targetSsid == null ? "" : targetSsid);
         root.put("ip", connectedIp);

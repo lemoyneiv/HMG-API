@@ -489,6 +489,7 @@ public final class Hub {
         if ("battery12v.saver".equals(name)) return mapped(hscan(), "framework.hscan_service.battery_12v_saver");
         if ("hv.health".equals(name)) return valid(num(call(hscan(), "framework.hscan_service.hv_health")), 0, 255);
         if ("charging".equals(name)) return String.valueOf(num(call(hscan(), "framework.hscan_service.charging_status")));
+        if ("charging.plugged".equals(name)) return readPluggedIn();
         if ("hv.soc".equals(name)) {
             int half = hev("framework.hev_flag.display_soc");
             return half < 0 || half > 200 ? null : dec(half / 2f);
@@ -531,6 +532,37 @@ public final class Hub {
             return tenths < 0 ? null : dec(tenths / 10f);
         }
         return null;
+    }
+
+    static String readPluggedIn() throws Exception {
+        Object hs = hscan();
+        if (hs == null) return null;
+        int chg = num(call(hs, "framework.hscan_service.charging_status"));
+        if (chg > 0 && chg < 0xff) return "1";
+        int conn = optHscanInt(hs, "getConnectStatus");
+        if (conn > 0 && conn < 0x0f) return "1";
+        int pd = optHscanInt(hs, "getCF_OBC_PD_Stat");
+        if (pd == 1 || pd == 2) return "1";
+        if (optHscanBool(hs, "isConnectExternalEquipment")) return "1";
+        return (chg == 0 || conn == 0 || pd == 0) ? "0" : null;
+    }
+
+    static int optHscanInt(Object svc, String methodName) {
+        try {
+            Object v = svc.getClass().getMethod(methodName).invoke(svc);
+            return v instanceof Number ? ((Number) v).intValue() : Integer.MIN_VALUE;
+        } catch (Throwable ignored) {
+            return Integer.MIN_VALUE;
+        }
+    }
+
+    static boolean optHscanBool(Object svc, String methodName) {
+        try {
+            Object v = svc.getClass().getMethod(methodName).invoke(svc);
+            return Boolean.TRUE.equals(v);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     static int hev(String flag) throws Exception {

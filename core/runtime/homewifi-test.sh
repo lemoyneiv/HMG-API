@@ -198,6 +198,7 @@ chmod +x "$F/bin/app_process"
 has "wifi.sh service mode launches HomeWifiDaemon" "app_process /system/bin --nice-name=hmgapi.wifi hmgapi.wifi.HomeWifiDaemon" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" deadbeef)"
 has "wifi.sh CLI fallback forwards status" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli status" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" status)"
 has "wifi.sh CLI fallback forwards use off" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli use CAR_CAM_1 off" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" use CAR_CAM_1 off)"
+has "wifi.sh CLI fallback forwards keepawake" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli keepawake 15m plugged" "$(PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" keepawake 15m plugged)"
 has "wifi.sh CLI fallback preserves key in env only" "app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli connect Home key=sekret has=1" "$(HMGAPI_WIFI_PSK=sekret HMGAPI_WIFI_HAS_PSK=1 PATH=$F/bin:$PATH $UNIT_SH "$D/state/wifi.sh" connect Home)"
 
 # Prepare fake routing table state for HomeWifiRouter check inside HomeWifiControllerTest
@@ -209,6 +210,7 @@ FW=$F/fw PATH=$F/bin:$PATH ip route replace 10.4.0.0/16 dev wlan0 proto kernel
 javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" \
     core/runtime/java/hmgapi/wifi/WifiSecurity.java \
     core/runtime/java/hmgapi/wifi/WifiPlatform.java \
+    core/runtime/java/hmgapi/wifi/HomeWifiKeepAwake.java \
     core/runtime/java/hmgapi/wifi/HomeWifiStore.java \
     core/runtime/java/hmgapi/wifi/HomeWifiRouter.java \
     core/runtime/java/hmgapi/wifi/HomeWifiController.java \

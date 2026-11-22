@@ -61,6 +61,8 @@ public final class HomeWifiRouter {
             execCode("ndc", "resolver", "setifdns", IFACE, "", d1);
         }
 
+        writeSystemLeaseQuietly(gw, d1, d2, ip);
+
         String sig = gw + "|" + d1 + "|" + (d2 == null ? "" : d2);
         if (!sig.equals(activeLeaseSignature)) {
             clearDnsHostRoutes();
@@ -91,6 +93,32 @@ public final class HomeWifiRouter {
         execCode("iptables", "-t", "nat", "-F", "HMGAPI_HOMEDNS");
         clearDnsHostRoutes();
         activeLeaseSignature = "";
+        java.io.File lf = new java.io.File("/data/hmgapi/wifi/lease");
+        if (lf.isFile()) lf.delete();
+    }
+
+    private static void writeSystemLeaseQuietly(String gw, String d1, String d2, String ip) {
+        try {
+            java.io.File dir = new java.io.File("/data/hmgapi/wifi");
+            if (!dir.isDirectory()) return;
+            java.io.File tmp = new java.io.File(dir, ".lease.tmp");
+            java.io.File lf = new java.io.File(dir, "lease");
+            String line = (gw == null ? "" : gw) + " " + (d1 == null ? "" : d1)
+                    + (d2 != null && !d2.isEmpty() ? (" " + d2) : "")
+                    + (ip != null && !ip.isEmpty() ? (" " + ip) : "") + "\n";
+            java.io.FileOutputStream out = new java.io.FileOutputStream(tmp);
+            try {
+                out.write(line.getBytes(StandardCharsets.UTF_8));
+            } finally {
+                out.close();
+            }
+            tmp.setReadable(false, false);
+            tmp.setWritable(false, false);
+            tmp.setReadable(true, true);
+            tmp.setWritable(true, true);
+            tmp.renameTo(lf);
+        } catch (Exception ignored) {
+        }
     }
 
     private void clearDnsHostRoutes() {

@@ -61,6 +61,7 @@ public final class Vehicle {
         add(m, "hv.conditioning_failure", "raw", 5000, "battery conditioning failure popup flag (BMS), as the car sends it; meaning of values not known yet");
         add(m, "conditioning.state", "text", 1000, "HMG-API's conditioning request: off, requested, waiting, active, stopping, ended (by the car), timed_out");
         add(m, "charging", "raw", 5000, "charging status");
+        add(m, "charging.plugged", "0/1", 2000, "charge cable or external adapter plugged in (EVSE connected, OBC proximity, V2L, or charging)");
         add(m, "odometer", "km", 60000, "odometer");
         for (String seat : new String[] { "driver", "passenger", "rear_left", "rear_right" }) {
             add(m, "seat_heat." + seat, "0-3", 1000, seat + " seat heat level (0 off; a two-level seat, the EV6's rear: 0-2)");

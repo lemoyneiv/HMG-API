@@ -45,6 +45,8 @@ public final class HomeWifiControllerTest {
         testBcmdhdAssociationWatchdogRecovery();
         testWrongPasswordDetectionAndLiveFix();
         testAutoParked30sTimerShiftOutAndRebootRestore();
+        testParkedKeepAwakeUnpluggedAndPluggedIn();
+        testKeepAwake12vGuardianAndPeerOpenLink();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -349,6 +351,157 @@ public final class HomeWifiControllerTest {
         }
     }
 
+    private static void testParkedKeepAwakeUnpluggedAndPluggedIn() throws Exception {
+        File root = Files.createTempDirectory("hw-keepawake").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("Garage5G", "garage-password", true, "[WPA2-PSK-CCMP][ESS]", true);
+
+            // Verify defaults: 30m unplugged, plugged (unlimited) when plugged in
+            check("Default keepAwakeUnplugged", "30m", store.getKeepAwakeUnplugged());
+            check("Default keepAwakePlugged", "plugged", store.getKeepAwakePlugged());
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.nowMs = 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 88, false);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+            checkTrue("No power lock while car is ON", !plat.holdParkedPower && !plat.holdWifiLock);
+
+            // 1. Park unplugged (default 30m)
+            plat.nowMs = 20000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 88, false);
+            ctl.tickVehicleAndHealth();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            checkTrue("Unplugged parked session holds WifiLock + ParkedPower", plat.holdWifiLock && plat.holdParkedPower);
+
+            // Simulate DHCP completion and verify /data/hmgapi/wifi/lease is written BEFORE public/wifi.json
+            int ip = ipToInt(192, 168, 50, 42);
+            int gw = ipToInt(192, 168, 50, 1);
+            int dns1 = ipToInt(1, 1, 1, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "Garage5G", "aa:bb:cc:dd:ee:01",
+                    -52, 5180, ip, ip, gw, ipToInt(255, 255, 255, 0), dns1, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+            File leaseFile = new File(root, "data/hmgapi/wifi/lease");
+            checkTrue("Root /data/hmgapi/wifi/lease written on connect", leaseFile.isFile());
+            String leaseTxt = HomeWifiStore.readText(leaseFile).trim();
+            check("Lease contains gw, dns1, ip", "192.168.50.1 1.1.1.1 192.168.50.42", leaseTxt);
+
+            File kaFile = new File(root, "data/hmgapi/public/keepawake.json");
+            checkTrue("Public keepawake.json written while parked", kaFile.isFile());
+            Map<String, Object> kaObj = Json.object(HomeWifiStore.readText(kaFile));
+            check("keepawake.json active=true", Boolean.TRUE, kaObj.get("active"));
+
+            // At +20 minutes: still awake and connected!
+            plat.nowMs = 20000L + 20L * 60000L;
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> st20 = Json.object(ctl.statusJson());
+            check("Still connected at +20m unplugged", "connected", st20.get("phase"));
+            checkTrue("Still holding parked power at +20m", plat.holdParkedPower && plat.holdWifiLock);
+
+            // At +30m + 1s: keep-awake expires -> client Wi-Fi stopped WITHOUT starting SoftAP in empty garage!
+            plat.nowMs = 20000L + 30L * 60000L + 1000L;
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> st31 = Json.object(ctl.statusJson());
+            check("Phase transitions to sleep at +30m", "sleep", st31.get("phase"));
+            checkTrue("Locks released at +30m", !plat.holdParkedPower && !plat.holdWifiLock);
+            checkTrue("Client Wi-Fi disabled for sleep", plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED);
+            checkTrue("SoftAP NOT turned on while car is still off", !plat.softApActive);
+            checkTrue("Lease file cleared on sleep", !leaseFile.isFile());
+
+            // Now turn car ON -> SoftAP restored immediately!
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 90, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("SoftAP restored immediately when car turns ON", plat.softApActive);
+            checkTrue("keepawake.json cleared when car turns ON", !kaFile.isFile());
+
+            // 2. Park PLUGGED IN (scheduled TOU charge: pluggedIn=true, charging=false!)
+            plat.nowMs = 3000000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, true, false, 85, false);
+            ctl.tickVehicleAndHealth();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            checkTrue("Plugged-in idle session holds power", plat.holdParkedPower);
+
+            // Advance +4 hours while plugged in -> STILL awake ("plugged" = unlimited while plugged in)!
+            plat.nowMs = 3000000L + 4L * 3600L * 1000L;
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> stPlug4h = Json.object(ctl.statusJson());
+            check("Unlimited while plugged in after 4 hours", Boolean.TRUE, stPlug4h.get("keepAwakeUnlimited"));
+            checkTrue("Power still held at +4h while plugged in", plat.holdParkedPower);
+
+            // Unplug cable at +4 hours -> 60s grace window for final sync, then sleeps!
+            plat.nowMs += 1000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 84, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("60s unplug sync grace keeps Wi-Fi/power briefly", plat.holdParkedPower);
+
+            plat.nowMs += 61000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Sleeps cleanly after 60s unplug grace", !plat.holdParkedPower && "sleep".equals(Json.object(ctl.statusJson()).get("phase")));
+
+            // Configure custom keepawake via IPC verb
+            HomeWifiController.CmdResult rKa = ctl.handleCommand(Arrays.asList("keepawake", "15m", "2h"));
+            check("keepawake IPC succeeds", Integer.valueOf(0), Integer.valueOf(rKa.code));
+            check("Updated keepAwakeUnplugged", "15m", store.getKeepAwakeUnplugged());
+            check("Updated keepAwakePlugged", "2h", store.getKeepAwakePlugged());
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testKeepAwake12vGuardianAndPeerOpenLink() throws Exception {
+        File root = Files.createTempDirectory("hw-peer-12v").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("HomeNet", "home-password", true, "[WPA2-PSK-CCMP][ESS]", true);
+            store.setKeepAwakePolicy("5m", "plugged");
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.nowMs = 50000L;
+            // Peer OpenLink lease wants 30m!
+            File peerFile = new File(root, "data/hmgapi/public/openlink-keepawake.json");
+            peerFile.getParentFile().mkdirs();
+            long peerExp = 50000L + 30L * 60000L;
+            Files.write(peerFile.toPath(),
+                    ("{\"bootId\":\"boot-1\",\"active\":true,\"unlimited\":false,\"cutBy12vFloor\":false,"
+                            + "\"expiresAtElapsedMs\":" + peerExp + ",\"remainingSec\":1800,\"updatedAtElapsedMs\":50000}\n")
+                            .getBytes("UTF-8"));
+
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 82, false);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+
+            // At +10 minutes (past Home Wi-Fi's own 5m, inside OpenLink's 30m): stays awake via OpenLink coordination!
+            plat.nowMs = 50000L + 10L * 60000L;
+            Files.write(peerFile.toPath(),
+                    ("{\"bootId\":\"boot-1\",\"active\":true,\"unlimited\":false,\"cutBy12vFloor\":false,"
+                            + "\"expiresAtElapsedMs\":" + peerExp + ",\"remainingSec\":1200,\"updatedAtElapsedMs\":" + plat.nowMs + "}\n")
+                            .getBytes("UTF-8"));
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> stExt = Json.object(ctl.statusJson());
+            check("Extended by OpenLink peer lease", Boolean.TRUE, stExt.get("keepAwakeExtendedByOpenLink"));
+            checkTrue("Stays in client mode while OpenLink lease active", (Boolean) stExt.get("active"));
+
+            // Single 12V dip to 62% -> 1st sample debounced (does NOT cut yet!)
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 62, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Single 12V dip debounced", plat.holdParkedPower);
+
+            // Second consecutive 12V sample at 62% (< 65% floor) -> cuts off immediately!
+            plat.nowMs += 5000L;
+            ctl.tickVehicleAndHealth();
+            Map<String, Object> stCut = Json.object(ctl.statusJson());
+            check("12V cutoff flagged", Boolean.TRUE, stCut.get("keepAwakeCutBy12v"));
+            checkTrue("Power & Wi-Fi released on 12V cutoff", !plat.holdParkedPower && !(Boolean) stCut.get("active"));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
     private static void testRouterWithFakeToolsIfPresent() throws Exception {
         String fw = System.getenv("FW");
         if (fw == null || fw.isEmpty()) return;
@@ -413,6 +566,8 @@ public final class HomeWifiControllerTest {
         int softApMode = 2;
         int lastRestoredApMode = -1;
         int wifiState = WIFI_STATE_DISABLED;
+        boolean holdWifiLock = false;
+        boolean holdParkedPower = false;
         int nextNetId = 10;
         int lastEnabledNetId = -1;
         String lastUpsertCaps = null;
@@ -456,6 +611,17 @@ public final class HomeWifiControllerTest {
             softApMode = mode;
             lastRestoredApMode = mode;
             return true;
+        }
+
+        @Override
+        public void stopClientWifiOnly() {
+            wifiState = WIFI_STATE_DISABLED;
+        }
+
+        @Override
+        public void setSessionLocks(boolean holdWifi, boolean holdPower) {
+            this.holdWifiLock = holdWifi;
+            this.holdParkedPower = holdPower;
         }
 
         @Override public int getWifiState() { return wifiState; }

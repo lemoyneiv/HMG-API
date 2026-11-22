@@ -143,6 +143,7 @@ Each entry is `"<id>"`, `"<id> <range>"` or `{"id": …, "version": <range>}`; r
 | `battery12v.saver` | raw | the Auxiliary Battery Saver option, telematics CAN service (`get_BAT_AuxBattOpt`) |
 | `hv.soc` | %, 0.5 steps | HEV service, `DISPLAY_SOC` |
 | `hv.health`, `hv.ready`, `hv.conditioning`, `charging` | raw | telematics CAN / HEV service |
+| `charging.plugged` | 0/1 | charge cable or external adapter plugged in (`getConnectStatus`, `getCF_OBC_PD_Stat`, `isConnectExternalEquipment`, or `charging`) |
 | `hv.conditioning_active` | 0/1 | the car's battery conditioning indicator (body control `getBattCondIndSta`): conditioning now |
 | `hv.battery_temp_min` | °C, whole | the pack's minimum temperature (cluster battery info, asked for on each read; `-` outside -40..60 °C) |
 | `hv.conditioning_failure` | raw | the BMS's conditioning failure popup flag (HEV `BMS_BATTCONDFAILPOPUP`); meaning of the values not known yet |

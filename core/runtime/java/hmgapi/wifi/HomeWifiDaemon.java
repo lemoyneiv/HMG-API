@@ -244,6 +244,21 @@ public final class HomeWifiDaemon {
                 return 1;
             }
         }
+        if ("keepawake".equals(verb)) {
+            if (!HomeWifiKeepAwake.isValidUnpluggedCode(arg1) || !HomeWifiKeepAwake.isValidPluggedCode(arg2)) {
+                System.out.println("Invalid keep-awake duration.");
+                return 2;
+            }
+            try {
+                store.setKeepAwakePolicy(arg1, arg2);
+                System.out.println("Updated Home Wi-Fi keep-awake (" + HomeWifiKeepAwake.labelForCode(arg1)
+                        + " unplugged / " + HomeWifiKeepAwake.labelForCode(arg2) + " plugged in).");
+                return 0;
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+                return 1;
+            }
+        }
         if ("status".equals(verb)) {
             HomeWifiController offline = new HomeWifiController(store, new InertPlatform(store));
             System.out.println(offline.statusJson());
@@ -267,6 +282,8 @@ public final class HomeWifiDaemon {
         @Override public void captureSoftApConfig() {}
         @Override public boolean disableSoftAp(int currentMode) { return false; }
         @Override public boolean restoreSoftAp(int mode) { return false; }
+        @Override public void stopClientWifiOnly() {}
+        @Override public void setSessionLocks(boolean holdWifiLock, boolean holdParkedPower) {}
         @Override public int getWifiState() { return WIFI_STATE_DISABLED; }
         @Override public boolean setWifiEnabled(boolean enabled) { return false; }
         @Override public boolean startScan() { return false; }

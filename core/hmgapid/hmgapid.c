@@ -1784,11 +1784,18 @@ static int op_wifi(int fd, int argc, char **argv)
           || (seq(v, "saved") && argc == 2) || (seq(v, "seen") && argc == 2)
           || ((seq(v, "join") || seq(v, "connect")) && (argc == 3 || argc == 4))
           || (seq(v, "use") && argc == 4 && (seq(argv[3], "on") || seq(argv[3], "off")))
+          || (seq(v, "keepawake") && argc == 4)
           || (seq(v, "forget") && argc == 3) || (seq(v, "now") && argc <= 3) || (seq(v, "back") && argc == 2))) {
-        say(fd, "usage: wifi status | scan [minutes] | saved | seen | join <network> [key] | connect <network> [key] | use <network> on|off | forget <network> | now [minutes] | back\n");
+        say(fd, "usage: wifi status | scan [minutes] | saved | seen | join <network> [key] | connect <network> [key] | use <network> on|off | keepawake <unplugged> <plugged> | forget <network> | now [minutes] | back\n");
         return 2;
     }
     if (x_stat64(ROOTDIR "/state/wifi.sh", st) != 0) {
+        if (seq(v, "keepawake")) {
+            a[n++] = APP_PROCESS; a[n++] = "/system/bin"; a[n++] = "hmgapi.wifi.HomeWifiDaemon";
+            a[n++] = "cli"; a[n++] = "keepawake"; a[n++] = argv[2]; a[n++] = argv[3]; a[n] = 0;
+            extra[0] = "CLASSPATH=" ENGINE_JAR; extra[1] = 0;
+            return run_env(fd, a, extra, 1);
+        }
         say(fd, x_stat64(ROOTDIR "/settings/allow/home_wifi", st) == 0
             ? "Home Wi-Fi isn't applied yet (tap Apply changes, then restart)\n"
             : "Home Wi-Fi is off (HMG-API settings)\n");
@@ -1800,7 +1807,7 @@ static int op_wifi(int fd, int argc, char **argv)
     if (sr >= 0) return sr;
     a[n++] = SH; a[n++] = ROOTDIR "/state/wifi.sh"; a[n++] = argv[1];
     if (argc >= 3) a[n++] = argv[2];
-    if (seq(v, "use")) a[n++] = argv[3];
+    if (seq(v, "use") || seq(v, "keepawake")) a[n++] = argv[3];
     a[n] = 0;
     path3(psk, sizeof psk, "HMGAPI_WIFI_PSK=", has_psk ? argv[3] : "", "");
     extra[0] = psk;

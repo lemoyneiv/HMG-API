@@ -39,6 +39,9 @@ final class HomeWifiPage {
     LinearLayout statusPillHolder;
     TextView detailView;
     LinearLayout controlsHolder;
+    Button keepAwakeUnpluggedBtn;
+    Button keepAwakePluggedBtn;
+    TextView keepAwakeLiveNote;
     TextView savedHeaderNote;
     LinearLayout savedList;
     TextView nearbyTitle;
@@ -50,7 +53,37 @@ final class HomeWifiPage {
     String lastControlsSig = "";
     String lastSavedSig = "";
     String lastNearbySig = "";
+    String curKeepAwakeUnplugged = "30m";
+    String curKeepAwakePlugged = "plugged";
     JSONObject lastStatus = null;
+
+    private static final String[] UNPLUGGED_CODES = {
+            "off", "5m", "15m", "30m", "1h", "2h", "4h", "8h"
+    };
+    private static final String[] UNPLUGGED_LABELS = {
+            "Off (car's default ~5 min)",
+            "5 minutes",
+            "15 minutes",
+            "30 minutes (default)",
+            "1 hour",
+            "2 hours",
+            "4 hours",
+            "8 hours"
+    };
+    private static final String[] PLUGGED_CODES = {
+            "off", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "plugged"
+    };
+    private static final String[] PLUGGED_LABELS = {
+            "Off (car's default ~5 min)",
+            "5 minutes",
+            "15 minutes",
+            "30 minutes",
+            "1 hour",
+            "2 hours",
+            "4 hours",
+            "8 hours",
+            "While plugged in — no time limit (default)"
+    };
 
     HomeWifiPage(MainActivity a, LinearLayout page) {
         this.a = a;
@@ -58,7 +91,11 @@ final class HomeWifiPage {
     }
 
     void show(final SettingsTab tab) {
-        Ui.text(page, "Automatically connects to your saved Wi-Fi networks 30 seconds after you turn off the car so HMG-API "
+        SharedPreferences prefs = a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE);
+        curKeepAwakeUnplugged = prefs.getString("wifi_keepawake_unplugged", "30m");
+        curKeepAwakePlugged = prefs.getString("wifi_keepawake_plugged", "plugged");
+
+        Ui.text(page, "Automatically connects to your saved Wi-Fi networks after you park and turn off the car so HMG-API "
                 + "and enabled mods can sync without using mobile data. Wireless CarPlay and Android Auto pause while Home Wi-Fi "
                 + "is active and resume automatically when you start the car.", 16, false, Ui.GREY);
 
@@ -87,6 +124,43 @@ final class HomeWifiPage {
         detailView = Ui.text(statusCard, "Loading current Wi-Fi state…", 16, false, Ui.GREY);
         controlsHolder = Ui.column(a);
         statusCard.addView(controlsHolder);
+
+        Ui.line(page);
+
+        // Parked Keep-Awake section (Unplugged vs. Plugged In)
+        Ui.text(page, "Keep Awake When Parked", 22, true, Ui.TEXT);
+        Ui.text(page, "Keeps the head unit powered with the screen completely dark after you turn off the car so Home Wi-Fi "
+                + "stays connected. Automatically coordinates with OpenLink (staying awake for whichever timer is longer) and "
+                + "disconnects early if the 12V battery gets low.", 15, false, Ui.GREY);
+
+        LinearLayout kaCard = Ui.column(a);
+        kaCard.setBackground(Ui.box(a, Ui.PANEL, Ui.LINE, 10));
+        kaCard.setPadding(pad, Ui.dp(a, 10), pad, Ui.dp(a, 10));
+        page.addView(kaCard);
+
+        LinearLayout rowUnplugged = Ui.row(a);
+        kaCard.addView(rowUnplugged);
+        TextView lblUnplugged = Ui.text(rowUnplugged, "When unplugged (on 12V battery)", 18, false, Ui.TEXT);
+        lblUnplugged.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        keepAwakeUnpluggedBtn = Ui.button(rowUnplugged, shortKeepAwakeLabel(curKeepAwakeUnplugged), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                promptKeepAwakeChoice(false);
+            }
+        });
+
+        LinearLayout rowPlugged = Ui.row(a);
+        kaCard.addView(rowPlugged);
+        TextView lblPlugged = Ui.text(rowPlugged, "When plugged in (charging or scheduled)", 18, false, Ui.TEXT);
+        lblPlugged.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        keepAwakePluggedBtn = Ui.button(rowPlugged, shortKeepAwakeLabel(curKeepAwakePlugged), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                promptKeepAwakeChoice(true);
+            }
+        });
+
+        keepAwakeLiveNote = Ui.text(kaCard, "12V battery protection: 65% floor when unplugged • 55% floor when plugged in idle.", 14, false, Ui.GREY);
 
         Ui.line(page);
 
@@ -249,9 +323,110 @@ final class HomeWifiPage {
         detailView.setText(detail);
         detailView.setTextColor(("auth_failed".equals(phase) || "dhcp_timeout".equals(phase)) ? Ui.ERROR : Ui.TEXT);
 
+        renderKeepAwakeStatus(st);
         renderControls(active);
         renderSavedNetworks(st.optJSONArray("saved"));
         renderNearbyNetworks(st.optJSONArray("nearby"), active);
+    }
+
+    private void renderKeepAwakeStatus(JSONObject st) {
+        String u = st.optString("keepAwakeUnplugged", curKeepAwakeUnplugged);
+        String p = st.optString("keepAwakePlugged", curKeepAwakePlugged);
+        if (!u.isEmpty() && !u.equals(curKeepAwakeUnplugged)) {
+            curKeepAwakeUnplugged = u;
+            a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE)
+                    .edit().putString("wifi_keepawake_unplugged", u).apply();
+        }
+        if (!p.isEmpty() && !p.equals(curKeepAwakePlugged)) {
+            curKeepAwakePlugged = p;
+            a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE)
+                    .edit().putString("wifi_keepawake_plugged", p).apply();
+        }
+        if (keepAwakeUnpluggedBtn != null) {
+            keepAwakeUnpluggedBtn.setText(shortKeepAwakeLabel(curKeepAwakeUnplugged));
+        }
+        if (keepAwakePluggedBtn != null) {
+            keepAwakePluggedBtn.setText(shortKeepAwakeLabel(curKeepAwakePlugged));
+        }
+        if (keepAwakeLiveNote != null) {
+            boolean pluggedIn = st.optBoolean("pluggedIn", false);
+            boolean charging = st.optBoolean("charging", false);
+            int b12 = st.optInt("bat12vSoc", -1);
+            boolean kaActive = st.optBoolean("keepAwakeActive", false);
+            boolean kaUnlimited = st.optBoolean("keepAwakeUnlimited", false);
+            int kaRem = st.optInt("keepAwakeRemainingSec", 0);
+            boolean extOl = st.optBoolean("keepAwakeExtendedByOpenLink", false);
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("Current vehicle state: ");
+            sb.append(charging ? "Actively charging" : (pluggedIn ? "Plugged in (idle / scheduled)" : "Unplugged"));
+            if (b12 >= 0) sb.append(" • 12V: ").append(b12).append("%");
+            if (kaActive) {
+                sb.append(" • Keep-awake active");
+                if (kaUnlimited) {
+                    sb.append(" (while plugged in)");
+                } else if (kaRem > 0) {
+                    sb.append(" (").append(Math.max(1, (kaRem + 59) / 60)).append(" min left)");
+                }
+                if (extOl) sb.append(" via OpenLink");
+            }
+            keepAwakeLiveNote.setText(sb.toString());
+            keepAwakeLiveNote.setTextColor(pluggedIn ? Ui.GREEN : Ui.GREY);
+        }
+    }
+
+    private void promptKeepAwakeChoice(final boolean forPluggedIn) {
+        final String[] codes = forPluggedIn ? PLUGGED_CODES : UNPLUGGED_CODES;
+        final String[] labels = forPluggedIn ? PLUGGED_LABELS : UNPLUGGED_LABELS;
+        String current = forPluggedIn ? curKeepAwakePlugged : curKeepAwakeUnplugged;
+        int checkedIdx = 0;
+        for (int i = 0; i < codes.length; i++) {
+            if (codes[i].equals(current)) {
+                checkedIdx = i;
+                break;
+            }
+        }
+        new AlertDialog.Builder(a)
+                .setTitle(forPluggedIn
+                        ? "Keep Awake When Plugged In"
+                        : "Keep Awake When Unplugged")
+                .setSingleChoiceItems(labels, checkedIdx, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        d.dismiss();
+                        if (which < 0 || which >= codes.length) return;
+                        final String nextUnplugged = forPluggedIn ? curKeepAwakeUnplugged : codes[which];
+                        final String nextPlugged = forPluggedIn ? codes[which] : curKeepAwakePlugged;
+                        curKeepAwakeUnplugged = nextUnplugged;
+                        curKeepAwakePlugged = nextPlugged;
+                        a.getSharedPreferences("hmgapi", Context.MODE_PRIVATE).edit()
+                                .putString("wifi_keepawake_unplugged", nextUnplugged)
+                                .putString("wifi_keepawake_plugged", nextPlugged)
+                                .apply();
+                        if (keepAwakeUnpluggedBtn != null) {
+                            keepAwakeUnpluggedBtn.setText(shortKeepAwakeLabel(curKeepAwakeUnplugged));
+                        }
+                        if (keepAwakePluggedBtn != null) {
+                            keepAwakePluggedBtn.setText(shortKeepAwakeLabel(curKeepAwakePlugged));
+                        }
+                        runWifiAction("keepawake", nextUnplugged, nextPlugged, true);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private static String shortKeepAwakeLabel(String code) {
+        if ("off".equals(code)) return "Off";
+        if ("5m".equals(code)) return "5 minutes";
+        if ("15m".equals(code)) return "15 minutes";
+        if ("30m".equals(code)) return "30 minutes";
+        if ("1h".equals(code)) return "1 hour";
+        if ("2h".equals(code)) return "2 hours";
+        if ("4h".equals(code)) return "4 hours";
+        if ("8h".equals(code)) return "8 hours";
+        if ("plugged".equals(code)) return "While plugged in";
+        return "30 minutes";
     }
 
     private void renderControls(boolean active) {

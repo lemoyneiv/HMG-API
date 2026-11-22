@@ -80,14 +80,27 @@ public interface WifiPlatform {
     }
 
     final class VehicleSnapshot {
-        public final String power;   // "on", "delay_mode", "adm", "off", ""
+        public final String power;   // "on", "logic_on", "delay_mode", "adm", "preparing_off", "off", ""
         public final boolean parked;
         public final boolean gearPark;
+        public final boolean pluggedIn;
+        public final boolean charging;
+        public final int bat12vSoc;  // 0..100, or -1 if unknown
+        public final boolean saver12v;
 
         public VehicleSnapshot(String power, boolean parked, boolean gearPark) {
+            this(power, parked, gearPark, false, false, -1, false);
+        }
+
+        public VehicleSnapshot(String power, boolean parked, boolean gearPark,
+                               boolean pluggedIn, boolean charging, int bat12vSoc, boolean saver12v) {
             this.power = power == null ? "" : power.trim();
             this.parked = parked;
             this.gearPark = gearPark;
+            this.pluggedIn = pluggedIn || charging;
+            this.charging = charging;
+            this.bat12vSoc = bat12vSoc;
+            this.saver12v = saver12v;
         }
 
         public boolean isPowerOn() {
@@ -117,6 +130,9 @@ public interface WifiPlatform {
     void captureSoftApConfig();
     boolean disableSoftAp(int currentMode);
     boolean restoreSoftAp(int mode);
+    void stopClientWifiOnly();
+
+    void setSessionLocks(boolean holdWifiLock, boolean holdParkedPower);
 
     int getWifiState();
     boolean setWifiEnabled(boolean enabled);

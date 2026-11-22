@@ -62,18 +62,26 @@ public final class HomeWifiStore {
 
     private final File wifiDir;
     private final File publicWifiJson;
+    private final File publicKeepAwakeJson;
+    private final File peerOpenLinkKeepAwakeJson;
     private final File profilesFile;
+    private final File leaseFile;
     private final File seenFile;
     private final File apModeFile;
     private final File modeBootFile;
     private final Map<String, Profile> profilesByLower = new LinkedHashMap<String, Profile>();
+    private String keepAwakeUnplugged = HomeWifiKeepAwake.DEFAULT_UNPLUGGED;
+    private String keepAwakePlugged = HomeWifiKeepAwake.DEFAULT_PLUGGED;
 
     public HomeWifiStore(File rootDir) {
         File base = rootDir == null ? new File("/") : rootDir;
         File hmgDir = new File(base, "data/hmgapi");
         this.wifiDir = new File(hmgDir, "wifi");
         this.publicWifiJson = new File(hmgDir, "public/wifi.json");
+        this.publicKeepAwakeJson = new File(hmgDir, "public/keepawake.json");
+        this.peerOpenLinkKeepAwakeJson = new File(hmgDir, "public/openlink-keepawake.json");
         this.profilesFile = new File(wifiDir, "profiles.json");
+        this.leaseFile = new File(wifiDir, "lease");
         this.seenFile = new File(wifiDir, "seen");
         this.apModeFile = new File(wifiDir, "apmode");
         this.modeBootFile = new File(wifiDir, "mode");
@@ -81,6 +89,24 @@ public final class HomeWifiStore {
     }
 
     public File wifiDir() { return wifiDir; }
+
+    public synchronized String getKeepAwakeUnplugged() {
+        return keepAwakeUnplugged;
+    }
+
+    public synchronized String getKeepAwakePlugged() {
+        return keepAwakePlugged;
+    }
+
+    public synchronized void setKeepAwakePolicy(String unpluggedCode, String pluggedCode) throws IOException {
+        String u = HomeWifiKeepAwake.normalizeUnpluggedCode(unpluggedCode);
+        String p = HomeWifiKeepAwake.normalizePluggedCode(pluggedCode);
+        if (!u.equals(keepAwakeUnplugged) || !p.equals(keepAwakePlugged)) {
+            keepAwakeUnplugged = u;
+            keepAwakePlugged = p;
+            saveProfiles();
+        }
+    }
 
     public synchronized List<Profile> listProfiles() {
         return new ArrayList<Profile>(profilesByLower.values());
@@ -259,9 +285,19 @@ public final class HomeWifiStore {
     @SuppressWarnings("unchecked")
     private synchronized void loadProfiles() {
         profilesByLower.clear();
+        keepAwakeUnplugged = HomeWifiKeepAwake.DEFAULT_UNPLUGGED;
+        keepAwakePlugged = HomeWifiKeepAwake.DEFAULT_PLUGGED;
         if (!profilesFile.isFile()) return;
         try {
             Map<String, Object> root = Json.object(readText(profilesFile));
+            Object ku = root.get("keepAwakeUnplugged");
+            if (ku != null) {
+                keepAwakeUnplugged = HomeWifiKeepAwake.normalizeUnpluggedCode(String.valueOf(ku));
+            }
+            Object kp = root.get("keepAwakePlugged");
+            if (kp != null) {
+                keepAwakePlugged = HomeWifiKeepAwake.normalizePluggedCode(String.valueOf(kp));
+            }
             Object listObj = root.get("profiles");
             if (!(listObj instanceof List)) return;
             for (Object item : (List<Object>) listObj) {
@@ -313,6 +349,8 @@ public final class HomeWifiStore {
             arr.add(m);
         }
         Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("keepAwakeUnplugged", keepAwakeUnplugged);
+        root.put("keepAwakePlugged", keepAwakePlugged);
         root.put("profiles", arr);
         writeAtomic(profilesFile, Json.write(root) + "\n", false);
     }
@@ -375,6 +413,27 @@ public final class HomeWifiStore {
         return deduplicateAndSortScans(list);
     }
 
+    /** Writes /data/hmgapi/wifi/lease (0600 root-only) BEFORE public/wifi.json so root daemons have gw/dns immediately. */
+    public synchronized void saveLease(String gw, String dns1, String dns2, String ip) {
+        try {
+            wifiDir.mkdirs();
+            setOwnerOnlyDir(wifiDir);
+            String d1 = (dns1 != null && !dns1.isEmpty()) ? dns1 : (gw == null ? "" : gw);
+            String line = (gw == null ? "" : gw) + " " + d1
+                    + (dns2 != null && !dns2.isEmpty() ? (" " + dns2) : "")
+                    + (ip != null && !ip.isEmpty() ? (" " + ip) : "") + "\n";
+            if (leaseFile.isFile() && line.equals(readText(leaseFile))) {
+                return;
+            }
+            writeAtomic(leaseFile, line, false);
+        } catch (IOException ignored) {
+        }
+    }
+
+    public synchronized void clearLease() {
+        leaseFile.delete();
+    }
+
     /** Writes /data/hmgapi/public/wifi.json (0644, strictly zero SSID: mod SDK contract). */
     public synchronized void writePublicStatus(String state, int rssi, int freq) {
         try {
@@ -386,6 +445,33 @@ public final class HomeWifiStore {
             }
             writeAtomic(publicWifiJson, json, true);
         } catch (IOException ignored) {
+        }
+    }
+
+    /** Writes /data/hmgapi/public/keepawake.json (0644) so mods like OpenLink coordinate parked power cleanly. */
+    public synchronized void writeKeepAwakeLease(String bootId,
+                                                 HomeWifiKeepAwake.Verdict verdict,
+                                                 WifiPlatform.VehicleSnapshot veh,
+                                                 long nowElapsedMs) {
+        try {
+            File pubDir = publicKeepAwakeJson.getParentFile();
+            if (pubDir != null) pubDir.mkdirs();
+            String json = HomeWifiKeepAwake.formatLeaseJson(bootId, verdict, veh, nowElapsedMs);
+            writeAtomic(publicKeepAwakeJson, json, true);
+        } catch (IOException ignored) {
+        }
+    }
+
+    public synchronized void clearKeepAwakeLease() {
+        publicKeepAwakeJson.delete();
+    }
+
+    public synchronized HomeWifiKeepAwake.PeerLease readPeerOpenLinkLease() {
+        try {
+            if (!peerOpenLinkKeepAwakeJson.isFile()) return null;
+            return HomeWifiKeepAwake.parsePeerLeaseJson(readText(peerOpenLinkKeepAwakeJson));
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

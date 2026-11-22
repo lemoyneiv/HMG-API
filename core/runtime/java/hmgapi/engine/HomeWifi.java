@@ -116,6 +116,7 @@ final class HomeWifi {
         if (!on(e)) {
             script.delete();
             new File(e.data, "public/wifi.json").delete();
+            new File(e.data, "public/keepawake.json").delete();
             return null;
         }
         if (!(script.isFile() && Engine.read(script).equals(SCRIPT))) {
@@ -156,7 +157,7 @@ final class HomeWifi {
         "set -f",
         "JAR=/system/framework/hmgapi-hook.jar",
         "case $1 in",
-        "    status|scan|saved|seen|join|connect|use|forget|now|back|down)",
+        "    status|scan|saved|seen|join|connect|use|keepawake|forget|now|back|down)",
         "        CLASSPATH=$JAR exec app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli \"$@\"",
         "        ;;",
         "esac",
