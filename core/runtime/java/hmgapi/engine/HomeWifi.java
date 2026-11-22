@@ -55,6 +55,19 @@ final class HomeWifi {
         return w instanceof Map && Boolean.TRUE.equals(((Map<String, Object>) w).get("home"));
     }
 
+    /** enabled mods asking for mod.json "wifi": {"projection": true} */
+    @SuppressWarnings("unchecked")
+    static List<String> projection(Map<String, Map<String, Object>> json, Set<String> on) {
+        List<String> out = new ArrayList<String>();
+        if (json == null || on == null) return out;
+        for (String id : on) {
+            Map<String, Object> mj = json.get(id);
+            Object w = mj == null ? null : mj.get("wifi");
+            if (w instanceof Map && Boolean.TRUE.equals(((Map<String, Object>) w).get("projection"))) out.add(id);
+        }
+        return out;
+    }
+
     /** the owner's switch as HMG-API's own change set (id "hmgapi"): the stock client feature, in state/core */
     static Engine.Mod coreMod(Engine e) {
         if (!on(e)) return null;
@@ -110,13 +123,21 @@ final class HomeWifi {
         return net.length() > 0 || new File(e.stateDir, "mods-net.applied").isFile();
     }
 
-    /** the home Wi-Fi keeper's services.txt line, or null when it's off (its script written or removed) */
-    static String service(Engine e) throws Exception {
+    /** the Wi-Fi keeper's services.txt line (state/wifi.txt written), or null when nothing is asked */
+    static String service(Engine e, Map<String, Map<String, Object>> json, Set<String> on) throws Exception {
         File script = new File(e.stateDir, "wifi.sh");
-        if (!on(e)) {
-            script.delete();
+        boolean home = on(e);
+        List<String> proj = projection(json, on);
+        StringBuilder asks = new StringBuilder();
+        if (home) asks.append("home\n");
+        for (String id : proj) asks.append("projection ").append(id).append('\n');
+        ModRuntime.writeIfChanged(new File(e.stateDir, "wifi.txt"), asks.toString());
+        if (!home) {
             new File(e.data, "public/wifi.json").delete();
             new File(e.data, "public/keepawake.json").delete();
+        }
+        if (asks.length() == 0) {
+            script.delete();
             return null;
         }
         if (!(script.isFile() && Engine.read(script).equals(SCRIPT))) {
@@ -124,17 +145,35 @@ final class HomeWifi {
             Engine.write(tmp, SCRIPT);
             if (!tmp.renameTo(script)) throw new java.io.IOException("can't write wifi.sh");
         }
-        return "hmgapi wifi root android yes script " + SCRIPT_PATH + " - " + Integer.toHexString(SCRIPT.hashCode());
+        String stage = proj.isEmpty() ? "android" : "boot";
+        return "hmgapi wifi root " + stage + " yes script " + SCRIPT_PATH + " - " + Integer.toHexString(SCRIPT.hashCode());
+    }
+
+    private static boolean appliedHome(Engine e) {
+        File txt = new File(e.stateDir, "wifi.txt");
+        if (txt.isFile()) {
+            try {
+                for (String line : Engine.read(txt).split("\n")) {
+                    if ("home".equals(line.trim())) return true;
+                }
+                return false;
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return new File(e.stateDir, "wifi.sh").isFile();
     }
 
     /** the plan's lines */
     static List<String> describe(Engine e, Map<String, Map<String, Object>> json, Set<String> on) {
         List<String> out = new ArrayList<String>();
         boolean home = on(e);
-        if (home != new File(e.stateDir, "wifi.sh").isFile()) {
+        if (home != appliedHome(e)) {
             out.add("change   home Wi-Fi -> " + (home ? "on" : "off") + " [hmgapi]");
         }
         out.add("home Wi-Fi  " + (home ? "on: while the car is off, the hotspot off and the car's Wi-Fi client on the saved networks" : "off"));
+        List<String> proj = projection(json, on);
+        for (String id : proj) out.add("wifi     the projection AP up from boot, once each boot, unless a Wi-Fi client is on [" + id + "]");
         for (Map.Entry<String, String> m : modes(e, json, on).entrySet()) {
             String mode = m.getValue();
             out.add("network  " + ("home".equals(mode) ? "home Wi-Fi only (no cellular)" : "allow".equals(mode)
@@ -144,22 +183,41 @@ final class HomeWifi {
         return out;
     }
 
-    /**
-     * HMG-API's home Wi-Fi keeper launcher, run by hmgapid as root (service "hmgapi wifi") once
-     * Android is up. Replaces sh in-place with hmgapi.wifi.HomeWifiDaemon (WifiManager + BroadcastReceiver
-     * + @hmgapi-wifi IPC + table 95 split routing), with an offline CLI fallback when @hmgapi-wifi
-     * is not yet listening.
-     */
     static final String SCRIPT = Network.lines(
-        "# HMG-API's home Wi-Fi keeper wrapper (written by hmgapi.engine.HomeWifi).",
-        "#   sh wifi.sh [hash]          service mode: exec app_process -> hmgapi.wifi.HomeWifiDaemon",
+        "# HMG-API's Wi-Fi keeper wrapper (written by hmgapi.engine.HomeWifi).",
+        "#   sh wifi.sh [hash]          service mode: ensure projection AP if asked, then HomeWifiDaemon or QuickBoot watch",
         "#   sh wifi.sh <verb> [args]   offline CLI fallback when @hmgapi-wifi isn't listening yet",
         "set -f",
         "JAR=/system/framework/hmgapi-hook.jar",
+        "ASKS=/data/hmgapi/state/wifi.txt",
+        "W=/data/hmgapi/state/wifi",
         "case $1 in",
         "    status|scan|saved|seen|join|connect|use|keepawake|forget|now|back|down|log|log-usb|log-clear)",
         "        CLASSPATH=$JAR exec app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli \"$@\"",
         "        ;;",
         "esac",
-        "CLASSPATH=$JAR exec app_process /system/bin --nice-name=hmgapi.wifi hmgapi.wifi.HomeWifiDaemon");
+        "wants() { [ -f $ASKS ] && while read -r w rest; do [ \"$w\" = \"$1\" ] && { echo \"${rest:-$w}\"; }; done < $ASKS; }",
+        "boot() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }",
+        "now() { u=0; [ -r /proc/uptime ] && read -r u rest < /proc/uptime; u=${u%.*}; echo ${u:-0}; }",
+        "while ! service check wifi 2>/dev/null | grep -q ': found'; do sleep 2; done",
+        "if [ -n \"$(wants projection)\" ]; then",
+        "    mkdir -p $W",
+        "    if [ \"$(cat $W/ap.boot 2>/dev/null)\" != \"$(boot)\" ]; then",
+        "        if CLASSPATH=$JAR app_process /system/bin hmgapi.engine.WifiAp ensure-projection >/dev/null 2>&1; then",
+        "            boot > $W/ap.boot",
+        "        fi",
+        "    fi",
+        "fi",
+        "if [ -n \"$(wants home)\" ]; then",
+        "    CLASSPATH=$JAR exec app_process /system/bin --nice-name=hmgapi.wifi hmgapi.wifi.HomeWifiDaemon",
+        "fi",
+        "while :; do",
+        "    t0=$(now); sleep 30; d=$(($(now) - t0))",
+        "    if [ $d -gt 90 ] && [ -n \"$(wants projection)\" ]; then",
+        "        rm -f $W/ap.boot",
+        "        if CLASSPATH=$JAR app_process /system/bin hmgapi.engine.WifiAp ensure-projection >/dev/null 2>&1; then",
+        "            boot > $W/ap.boot",
+        "        fi",
+        "    fi",
+        "done");
 }

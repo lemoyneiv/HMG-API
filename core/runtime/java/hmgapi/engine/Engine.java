@@ -595,16 +595,19 @@ public final class Engine {
     /** the stock hotspot feature: without it the unit never powers its Wi-Fi chip */
     static final String HOTSPOT = "com.hkmc.software.wifihotspot";
 
-    /** mod.json "wifi": {"client": true} and/or {"hotspot": true} */
+    /** mod.json "wifi": {"client": true}, {"hotspot": true}, {"projection": true} and/or {"home": true} */
     @SuppressWarnings("unchecked")
     static boolean wifiAsk(Object wifi, String what) {
         if (wifi == null) return false;
-        String usage = "\"wifi\": {\"client\": true}, {\"hotspot\": true} and/or {\"home\": true}";
+        String usage = "\"wifi\": {\"client\": true}, {\"hotspot\": true}, {\"projection\": true} and/or {\"home\": true}";
         if (!(wifi instanceof Map)) throw new IllegalArgumentException(usage);
         for (Map.Entry<String, Object> e : ((Map<String, Object>) wifi).entrySet()) {
-            if (!("client".equals(e.getKey()) || "hotspot".equals(e.getKey()) || "home".equals(e.getKey())) || !(e.getValue() instanceof Boolean)) throw new IllegalArgumentException(usage);
+            String k = e.getKey();
+            if (!("client".equals(k) || "hotspot".equals(k) || "projection".equals(k) || "home".equals(k)) || !(e.getValue() instanceof Boolean)) throw new IllegalArgumentException(usage);
         }
-        return Boolean.TRUE.equals(((Map<String, Object>) wifi).get(what));
+        Map<String, Object> w = (Map<String, Object>) wifi;
+        if ("hotspot".equals(what) && Boolean.TRUE.equals(w.get("projection"))) return true;   // the projection AP needs the chip powered
+        return Boolean.TRUE.equals(w.get(what));
     }
 
     @SuppressWarnings("unchecked")

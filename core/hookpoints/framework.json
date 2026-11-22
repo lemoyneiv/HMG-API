@@ -763,6 +763,73 @@
       }
     },
     {
+      "id": "framework.navigation_cluster.update_tbt_trap_info",
+      "kind": "method",
+      "of": "framework.navigation_cluster",
+      "find": {
+        "name": "updateTBTTrapInfo",
+        "params": [
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int",
+          "int"
+        ],
+        "ret": "void"
+      },
+      "about": "speed limit, cameras, tolls and the countdown bar to the cluster (index 11 the bar, 12 the speed limit)"
+    },
+    {
+      "id": "framework.navi_tbt_trap_info",
+      "kind": "class",
+      "find": {
+        "name": "com.hkmc.cluster.NavigationCluster$NaviTbtTrapInfo"
+      },
+      "about": "one trap frame for updateTBTTrapInfoNew (speed limit, cameras, tolls, countdown bar)"
+    },
+    {
+      "id": "framework.navi_tbt_trap_info.new",
+      "kind": "ctor",
+      "of": "framework.navi_tbt_trap_info",
+      "find": {
+        "params": []
+      }
+    },
+    {
+      "id": "framework.navi_tbt_trap_info.bar_graph_level",
+      "kind": "field",
+      "of": "framework.navi_tbt_trap_info",
+      "find": {
+        "name": "barGraphLevel",
+        "type": "int"
+      }
+    },
+    {
+      "id": "framework.navigation_cluster.update_tbt_trap_info_new",
+      "kind": "method",
+      "of": "framework.navigation_cluster",
+      "find": {
+        "name": "updateTBTTrapInfoNew",
+        "params": [
+          "com.hkmc.cluster.NavigationCluster$NaviTbtTrapInfo"
+        ],
+        "ret": "void"
+      },
+      "about": "the trap frame as one object (speed limit, cameras, tolls and the countdown bar)"
+    },
+    {
       "id": "framework.usm_manager",
       "kind": "class",
       "find": {

@@ -17,48 +17,48 @@ Every point and map lives here, in HMG-API, including the ones only a mod in its
 uses (the wireless mod's, for one): a mod gets new points through an HMG-API release and its
 mod SDK ([mod-repos.md](mod-repos.md), section 4).
 
-407 hook points. **Cars** (`maps/`):
+412 hook points. **Cars** (`maps/`):
 
 | Car | Map | Points |
 |---|---|---|
-| Genesis G70 CAN 260903 | mapped on cars by HMG-API's own mapper | 397 of 407 |
-| Genesis G70 KOR 260902 | mapped on cars by HMG-API's own mapper | 357 of 407 |
-| Genesis G70 USA 260507 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Hyundai Ioniq 6 CAN 260206 | checked on a car | 407 of 407 |
-| Hyundai Ioniq 6 KOR 260902 | mapped on cars by HMG-API's own mapper | 349 of 407 |
-| Hyundai Ioniq 6 SGP 260907 | mapped on cars by HMG-API's own mapper | 328 of 407 |
-| Hyundai Ioniq 6 USA 260507 | mapped from stock files | 367 of 407 |
-| Hyundai Ioniq 6 USA 260903 | checked on a car | 407 of 407 |
-| Hyundai Elantra N USA 260903 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Hyundai Avante KOR 260902 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Hyundai Elantra USA 260507 | mapped on cars by HMG-API's own mapper | 407 of 407 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 CAN 260206 | mapped from stock files | 407 of 407 |
-| Hyundai Sonata, Sonata Hybrid, Santa Fe, Palisade KOR 260902 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260507 | mapped from stock files | 407 of 407 |
-| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260903 | mapped from stock files | 407 of 407 |
-| Hyundai Palisade USA 260507 | mapped from stock files | 367 of 407 |
-| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 407 of 407 |
-| Hyundai Ioniq 5 KOR 260902 | mapped from stock files | 407 of 407 |
-| Hyundai Ioniq 5 USA 260507 | mapped from stock files | 407 of 407 |
-| Hyundai Ioniq 5 USA 260903 | mapped from stock files | 407 of 407 |
-| Hyundai Kona USA 260903 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Hyundai Creta Electric IND 260430 | mapped on cars by HMG-API's own mapper | 368 of 407 |
-| Hyundai Creta IND 260430 | mapped on cars by HMG-API's own mapper | 354 of 407 |
-| Kia K3 KOR 260902 | mapped on cars by HMG-API's own mapper | 339 of 407 |
-| Kia EV6 CAN 260206 | mapped from stock files | 407 of 407 |
-| Kia EV6 IND 260430 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Kia EV6 KOR 260902 | mapped on cars by HMG-API's own mapper | 334 of 407 |
-| Kia EV6 USA 260507 | checked on a car | 407 of 407 |
-| Kia Carnival USA 260507 | mapped from stock files | 407 of 407 |
-| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21 CAN 260206 | mapped from stock files | 407 of 407 |
-| Kia K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray KOR 260902 | mapped from stock files | 407 of 407 |
-| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21 USA 260507 | mapped from stock files | 407 of 407 |
-| Kia Sportage (and Hybrid, Plug-in Hybrid), Forte, Carnival 2022, Niro Hybrid and Plug-in Hybrid, Soul, Seltos 2024 USA 260507 | mapped from stock files | 407 of 407 |
-| Kia Telluride USA 260507 | mapped from stock files | 407 of 407 |
-| Kia Niro EV CAN 260206 | mapped on cars by HMG-API's own mapper | 367 of 407 |
-| Kia Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024 CAN 260206 | mapped from stock files | 407 of 407 |
-| Kia Niro EV USA 260507 | mapped from stock files | 407 of 407 |
+| Genesis G70 CAN 260903 | mapped on cars by HMG-API's own mapper | 402 of 412 |
+| Genesis G70 KOR 260902 | mapped on cars by HMG-API's own mapper | 362 of 412 |
+| Genesis G70 USA 260507 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Hyundai Ioniq 6 CAN 260206 | checked on a car | 412 of 412 |
+| Hyundai Ioniq 6 KOR 260902 | mapped on cars by HMG-API's own mapper | 354 of 412 |
+| Hyundai Ioniq 6 SGP 260907 | mapped on cars by HMG-API's own mapper | 333 of 412 |
+| Hyundai Ioniq 6 USA 260507 | mapped from stock files | 372 of 412 |
+| Hyundai Ioniq 6 USA 260903 | checked on a car | 412 of 412 |
+| Hyundai Elantra N USA 260903 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Hyundai Avante KOR 260902 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Hyundai Elantra USA 260507 | mapped on cars by HMG-API's own mapper | 412 of 412 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 CAN 260206 | mapped from stock files | 412 of 412 |
+| Hyundai Sonata, Sonata Hybrid, Santa Fe, Palisade KOR 260902 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260507 | mapped from stock files | 412 of 412 |
+| Hyundai Elantra, Sonata, Santa Fe, Kona, Ioniq, Venue, Veloster N, Palisade 2020-22 USA 260903 | mapped from stock files | 412 of 412 |
+| Hyundai Palisade USA 260507 | mapped from stock files | 372 of 412 |
+| Hyundai Palisade USA 260903 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Hyundai Ioniq 5 CAN 260206 | mapped from stock files | 412 of 412 |
+| Hyundai Ioniq 5 KOR 260902 | mapped from stock files | 412 of 412 |
+| Hyundai Ioniq 5 USA 260507 | mapped from stock files | 412 of 412 |
+| Hyundai Ioniq 5 USA 260903 | mapped from stock files | 412 of 412 |
+| Hyundai Kona USA 260903 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Hyundai Creta Electric IND 260430 | mapped on cars by HMG-API's own mapper | 373 of 412 |
+| Hyundai Creta IND 260430 | mapped on cars by HMG-API's own mapper | 359 of 412 |
+| Kia K3 KOR 260902 | mapped on cars by HMG-API's own mapper | 344 of 412 |
+| Kia EV6 CAN 260206 | mapped from stock files | 412 of 412 |
+| Kia EV6 IND 260430 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Kia EV6 KOR 260902 | mapped on cars by HMG-API's own mapper | 339 of 412 |
+| Kia EV6 USA 260507 | checked on a car | 412 of 412 |
+| Kia Carnival USA 260507 | mapped from stock files | 412 of 412 |
+| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-21, Telluride 2020-21 CAN 260206 | mapped from stock files | 412 of 412 |
+| Kia K5, Sorento, Stinger, Seltos, Soul, Niro, Mohave, K7, Morning, Ray KOR 260902 | mapped from stock files | 412 of 412 |
+| Kia K5, Sorento, Stinger, Soul, Seltos 2021, Niro 2020-22, Cadenza, Telluride 2020-21 USA 260507 | mapped from stock files | 412 of 412 |
+| Kia Sportage (and Hybrid, Plug-in Hybrid), Forte, Carnival 2022, Niro Hybrid and Plug-in Hybrid, Soul, Seltos 2024 USA 260507 | mapped from stock files | 412 of 412 |
+| Kia Telluride USA 260507 | mapped from stock files | 412 of 412 |
+| Kia Niro EV CAN 260206 | mapped on cars by HMG-API's own mapper | 372 of 412 |
+| Kia Niro, Sportage, Carnival, Telluride, Forte, Soul, Seltos 2024 CAN 260206 | mapped from stock files | 412 of 412 |
+| Kia Niro EV USA 260507 | mapped from stock files | 412 of 412 |
 
 In the tables, **Cars** is "all" when every car above has the point, otherwise the cars without it.
 
@@ -136,6 +136,11 @@ Android framework and the car's service interfaces (any process).
 | `framework.crossroad_name` | class | `com.hkmc.cluster.NavigationCluster$CrossroadName` |  | all |
 | `framework.crossroad_name.new` | ctor | `new ()` |  | all |
 | `framework.crossroad_name.name` | field | `name`: String |  | all |
+| `framework.navigation_cluster.update_tbt_trap_info` | method | `updateTBTTrapInfo(int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int)` → void | speed limit, cameras, tolls and the countdown bar to the cluster (index 11 the bar, 12 the speed limit) | all |
+| `framework.navi_tbt_trap_info` | class | `com.hkmc.cluster.NavigationCluster$NaviTbtTrapInfo` | one trap frame for updateTBTTrapInfoNew (speed limit, cameras, tolls, countdown bar) | all |
+| `framework.navi_tbt_trap_info.new` | ctor | `new ()` |  | all |
+| `framework.navi_tbt_trap_info.bar_graph_level` | field | `barGraphLevel`: int |  | all |
+| `framework.navigation_cluster.update_tbt_trap_info_new` | method | `updateTBTTrapInfoNew(com.hkmc.cluster.NavigationCluster$NaviTbtTrapInfo)` → void | the trap frame as one object (speed limit, cameras, tolls and the countdown bar) | all |
 | `framework.usm_manager` | class | `com.hkmc.usm.USMManager` | the owner's settings (USM): units and the like | all |
 | `framework.usm_manager.new` | ctor | `new (android.content.Context)` |  | all |
 | `framework.usm_manager.distance_speed_unit` | method | `getDistanceSpeedUnit()` → int | the owner's distance unit: 0 km, 1 miles | all |
