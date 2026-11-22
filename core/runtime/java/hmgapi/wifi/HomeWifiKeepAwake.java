@@ -322,9 +322,10 @@ public final class HomeWifiKeepAwake {
         }
 
         // Stay in client Wi-Fi if:
-        //  - Effective keep-awake (own at-home keep-awake, or OpenLink peer precedence) is active, OR
-        //  - Own keep-awake is "off" during the initial <= 2m home-check window while MICOM is still in stock ADM
-        boolean stayClient = effectiveHoldPower || (!ownConfigured && !timerExpiredThisPark && !awayTimedOut);
+        //  - Not timed out away from home, AND
+        //  - Either effective keep-awake (own at-home keep-awake, or OpenLink peer precedence) is active, OR
+        //    own keep-awake is "off" during the initial <= 2m home-check window while MICOM is still in stock ADM
+        boolean stayClient = !awayTimedOut && (effectiveHoldPower || (!ownConfigured && !timerExpiredThisPark));
         boolean extendedByPeer = !ownActive && peerActive;
 
         return new Verdict(

@@ -467,7 +467,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     enterClientSession("Car parked / powered off");
                     platform.setSessionLocks(true, lastKeepAwakeVerdict.holdPower);
                 } else {
-                    platform.setSessionLocks(false, false);
+                    boolean holdPeerOrOwnPower = lastKeepAwakeVerdict.holdPower && !shuttingDownNow && !onlyPeerTeardownFlush;
+                    platform.setSessionLocks(false, holdPeerOrOwnPower);
                     phase = "sleep";
                     if (lastKeepAwakeVerdict.cutBy12v) {
                         headline = "Paused (12V battery protection)";
@@ -565,6 +566,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         enablePollCount = 0;
         lastLoggedScanSig = "";
         lastHeartbeatMs = platform.elapsedRealtimeMs();
+        liveScans.clear();
         pausedAutoLower.clear();
         cancelAllTimers();
 
@@ -631,7 +633,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
         store.flightLog().clearSessionActive();
         tearDownRoutesAndAdb("session_end");
         store.writePublicStatus("waiting", 0, 0);
-        platform.setSessionLocks(false, false);
+        boolean keepParkedPower = !restoreApNow && !lastVehicle.isPowerOn() && lastKeepAwakeVerdict.holdPower;
+        platform.setSessionLocks(false, keepParkedPower);
 
         String ownEnd = "reason=\"" + reason + "\" restoreApNow=" + restoreApNow
                 + " wasConnected=" + (prevConnected.isEmpty() ? "none" : ("\"" + prevConnected + "\""));

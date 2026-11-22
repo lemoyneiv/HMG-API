@@ -48,7 +48,9 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private static final String EXTRA_WIFI_AP_STATE = "wifi_state";
     private static final String VEHICLE_SOCK = "hmgapi-vehicle";
     private static final long PWRKEEP_REFRESH_MS = 30000L;
+    private static final long STANDALONE_PROJ_UNMUTE_MS = 20000L;
     private static final File STANDALONE_BL_MARKER = new File("/dev/.hmgapi-wifi-bl");
+    private static final File PROJECTION_RESUME_FILE = new File("/data/hmgapi/public/projection-resume.json");
 
     private final Context context;
     private final WifiManager wifiManager;
@@ -69,9 +71,12 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private boolean parkedDarkEntered = false;
     private boolean standaloneDarkBlanked = false;
     private boolean standaloneMutedAv = false;
+    private int standalonePreMode = -1;
+    private int standaloneFallbackMode = -1;
     private final Map<String, Integer> savedBacklight = new LinkedHashMap<String, Integer>();
     private long lastPwrKeepAssertMs = 0L;
     private String lastPwrKeepWaitSig = "";
+    private volatile int liveMicomIgn = -1;
     private volatile int liveMicomDoorsClosed = -1;
     private volatile int liveMicomDoorsLocked = -1;
     private volatile VehicleSnapshot lastGoodVehicle = null;
@@ -329,7 +334,14 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                                         liveMicomDoorsLocked = 0;
                                         triggerVehiclePushWake();
                                     }
-                                } else if (code == txIgn || code == txAcc) {
+                                } else if (code == txIgn) {
+                                    data.enforceInterface(desc);
+                                    if (data.dataAvail() >= 4) {
+                                        int ign = data.readInt();
+                                        if (ign == 0 || ign == 1) liveMicomIgn = ign;
+                                    }
+                                    triggerVehiclePushWake();
+                                } else if (code == txAcc) {
                                     triggerVehiclePushWake();
                                 }
                             } catch (Throwable ignored) {
@@ -349,6 +361,27 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    private boolean isDirectMicomIgnitionOn() {
+        try {
+            Object bcm = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
+            if (bcm != null) {
+                Object ign = bcm.getClass().getMethod("getIGNStatus").invoke(bcm);
+                if (ign instanceof Boolean) {
+                    boolean on = ((Boolean) ign).booleanValue();
+                    liveMicomIgn = on ? 1 : 0;
+                    return on;
+                }
+                if (ign instanceof Number) {
+                    int v = ((Number) ign).intValue();
+                    if (v == 0 || v == 1) liveMicomIgn = v;
+                    return v == 1;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return liveMicomIgn == 1;
     }
 
     private static int readStaticIntField(Class<?> cls, String name, int fallback) {
@@ -421,6 +454,15 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             if (power.isEmpty()) {
                 power = readDirectMicomPowerNameFallback();
             }
+            // On Gen5W, BCM.onIgnitionChanged(1) arrives ~1.0s before IMicomPowerService transitions
+            // power from "adm" (2) to "on" (0). Promoting power="on" immediately on ign==1 prevents
+            // misclassifying the car as still parked away-from-home and restores Mode 2 SoftAP right away.
+            if (!"on".equalsIgnoreCase(power) && !"logic_on".equalsIgnoreCase(power)
+                    && (liveMicomIgn == 1 || "adm".equalsIgnoreCase(power) || "delay_mode".equalsIgnoreCase(power))
+                    && isDirectMicomIgnitionOn()) {
+                power = "on";
+                parked = false;
+            }
             VehicleSnapshot snap = new VehicleSnapshot(
                     power, parked, gearPark, pluggedIn || charging, charging, bat12v, saver12v, doorsClosed, liveMicomDoorsLocked);
             lastGoodVehicle = snap;
@@ -431,6 +473,9 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         } catch (Exception e) {
             VehicleSnapshot prev = lastGoodVehicle;
             String directPower = readDirectMicomPowerNameFallback();
+            if (!"on".equalsIgnoreCase(directPower) && isDirectMicomIgnitionOn()) {
+                directPower = "on";
+            }
             if (!directPower.isEmpty()) {
                 boolean isOn = "on".equalsIgnoreCase(directPower);
                 if (isOn) {
@@ -551,9 +596,14 @@ public final class AndroidWifiPlatform implements WifiPlatform {
 
     @Override
     public boolean disableSoftAp(int currentMode) {
+        if (savedApConfig == null) {
+            captureSoftApConfig();
+        }
         if (currentMode == 2) {
+            if (savedApConfig != null && invokeSoftAp("setWifiApEnabledForConnectivity", savedApConfig, false)) return true;
             if (invokeSoftAp("setWifiApEnabledForConnectivity", null, false)) return true;
         }
+        if (savedApConfig != null && invokeSoftAp("setWifiApEnabled", savedApConfig, false)) return true;
         return invokeSoftAp("setWifiApEnabled", null, false);
     }
 
@@ -612,7 +662,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
         if (holdParkedPower) {
             long now = elapsedRealtimeMs();
-            boolean darkActive = holdWifiLock; // false = ADM RAP pre-latch while seated; true = parked dark session
+            boolean darkActive = holdWifiLock || parkedDarkEntered; // false = ADM RAP pre-latch while seated; true = parked dark session
             boolean enteringDark = darkActive && !parkedDarkEntered;
             if (!pwrKeepHeld || enteringDark || (now - lastPwrKeepAssertMs) >= PWRKEEP_REFRESH_MS) {
                 boolean isRefresh = pwrKeepHeld && !enteringDark;
@@ -635,7 +685,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 pwrKeepHeld = false;
                 lastPwrKeepAssertMs = 0L;
                 if (!isPeerOpenLinkHoldingPower()) {
-                    String stopDetail = releaseMicomPwrKeepQuietly(wasDark);
+                    String stopDetail = releaseMicomPwrKeepWhenReady(wasDark, 0);
                     recordPlatformFlight("PWRKEEP_STOP", "peerHold=false " + stopDetail, true);
                     log("Released parked MICOM PwrKeep(1) (" + stopDetail + ")");
                 } else {
@@ -763,6 +813,43 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
+    private static int readDirectMicomMode() {
+        try {
+            Object modeSvc = getMicomBinder("com.hkmc.micom.mode", "com.hkmc.mode.IModeManager$Stub");
+            if (modeSvc != null) {
+                Object mObj = modeSvc.getClass().getMethod("getCurrentMode").invoke(modeSvc);
+                if (mObj instanceof Number) return ((Number) mObj).intValue();
+            }
+        } catch (Throwable ignored) {
+        }
+        return -1;
+    }
+
+    private void writeStandaloneProjectionResumeHint(int preMode) {
+        try {
+            File pubDir = PROJECTION_RESUME_FILE.getParentFile();
+            if (pubDir != null && !pubDir.exists()) {
+                pubDir.mkdirs();
+                pubDir.setReadable(true, false);
+                pubDir.setExecutable(true, false);
+            }
+            long now = elapsedRealtimeMs();
+            String src = (preMode == 115) ? "cp" : "aa";
+            String json = "{\"bootId\":\"" + bootId() + "\",\"preMode\":" + preMode
+                    + ",\"source\":\"" + src + "\",\"resumedAtElapsedMs\":" + now
+                    + ",\"expiresAtElapsedMs\":" + (now + 45000L) + "}\n";
+            File tmp = new File(PROJECTION_RESUME_FILE.getAbsolutePath() + ".tmp");
+            writeFileQuietly(tmp, json);
+            tmp.setReadable(true, false);
+            if (tmp.renameTo(PROJECTION_RESUME_FILE)) {
+                PROJECTION_RESUME_FILE.setReadable(true, false);
+            } else {
+                tmp.delete();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void enforceStandaloneDarkBlankingQuietly() {
         try {
             Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
@@ -771,6 +858,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 int pwrSt = pObj instanceof Number ? ((Number) pObj).intValue() : -1;
                 if (pwrSt == 0 || pwrSt == 1) return;
                 if (!standaloneDarkBlanked) {
+                    standalonePreMode = readDirectMicomMode();
                     boolean avWasOff = false;
                     try {
                         avWasOff = Boolean.TRUE.equals(pwr.getClass().getMethod("isAvPowerOff").invoke(pwr));
@@ -803,6 +891,49 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
+    private void unmuteStandaloneAvNow() {
+        try {
+            Object aud = getMicomBinder("com.hkmc.micom.audiosetup", "com.hkmc.media.IMicomAudioService$Stub");
+            if (aud != null) {
+                aud.getClass().getMethod("unMuteAV").invoke(aud);
+            }
+        } catch (Throwable ignored) {
+        }
+        PROJECTION_RESUME_FILE.delete();
+    }
+
+    private void scheduleStandaloneProjectionUnmutePoll(final long startedMs, final long deadlineMs, final boolean reassertedAtOn) {
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (standaloneDarkBlanked) return;
+                long now = elapsedRealtimeMs();
+                int curMode = readDirectMicomMode();
+                if (curMode == 115 || curMode == 116 || now >= deadlineMs) {
+                    unmuteStandaloneAvNow();
+                    return;
+                }
+                if (now - startedMs >= 2500L) {
+                    if (standaloneFallbackMode <= 0 && curMode > 0) {
+                        standaloneFallbackMode = curMode;
+                    } else if (standaloneFallbackMode > 0 && curMode > 0 && curMode != standaloneFallbackMode) {
+                        unmuteStandaloneAvNow();
+                        return;
+                    }
+                }
+                boolean didReassert = reassertedAtOn;
+                if (!didReassert && "on".equalsIgnoreCase(readDirectMicomPowerNameFallback())) {
+                    didReassert = true;
+                    try {
+                        Object aud = getMicomBinder("com.hkmc.micom.audiosetup", "com.hkmc.media.IMicomAudioService$Stub");
+                        if (aud != null) aud.getClass().getMethod("muteAV").invoke(aud);
+                    } catch (Throwable ignored) {}
+                }
+                scheduleStandaloneProjectionUnmutePoll(startedMs, deadlineMs, didReassert);
+            }
+        }, 350L);
+    }
+
     private void restoreStandaloneDarkIfNeeded() {
         if (!standaloneDarkBlanked && !STANDALONE_BL_MARKER.isFile()) return;
         standaloneDarkBlanked = false;
@@ -823,11 +954,17 @@ public final class AndroidWifiPlatform implements WifiPlatform {
                 try { bsSvc.getClass().getMethod("hideBlackScreen").invoke(bsSvc); } catch (Throwable ignored) {}
                 try { bsSvc.getClass().getMethod("screenOn").invoke(bsSvc); } catch (Throwable ignored) {}
             }
+            int preMode = standalonePreMode;
+            standalonePreMode = -1;
+            standaloneFallbackMode = -1;
             if (standaloneMutedAv) {
                 standaloneMutedAv = false;
-                Object aud = getMicomBinder("com.hkmc.micom.audiosetup", "com.hkmc.media.IMicomAudioService$Stub");
-                if (aud != null) {
-                    try { aud.getClass().getMethod("unMuteAV").invoke(aud); } catch (Throwable ignored) {}
+                if (preMode == 115 || preMode == 116) {
+                    writeStandaloneProjectionResumeHint(preMode);
+                    long now = elapsedRealtimeMs();
+                    scheduleStandaloneProjectionUnmutePoll(now, now + STANDALONE_PROJ_UNMUTE_MS, false);
+                } else {
+                    unmuteStandaloneAvNow();
                 }
             }
         } catch (Throwable ignored) {
@@ -941,30 +1078,40 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
-    private static String releaseMicomPwrKeepQuietly(boolean advanceAdmIfStillParked) {
+    private String releaseMicomPwrKeepWhenReady(final boolean advanceAdmIfStillParked, final int attempt) {
         String detail = "stop=ERR";
         try {
             Object pwr = getMicomBinder("com.hkmc.micom.power", "com.hkmc.power.IMicomPowerService$Stub");
             if (pwr != null) {
-                pwr.getClass().getMethod("requestPwrKeepStop", int.class).invoke(pwr, Integer.valueOf(1));
-                detail = "stop=OK";
-                if (advanceAdmIfStillParked) {
-                    Object pObj = pwr.getClass().getMethod("getPowerStatus").invoke(pwr);
-                    int pwrSt = pObj instanceof Number ? ((Number) pObj).intValue() : -1;
-                    boolean ignOn = false;
-                    Object bcm = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
-                    if (bcm != null) {
-                        try {
-                            Object ign = bcm.getClass().getMethod("getIGNStatus").invoke(bcm);
-                            ignOn = Boolean.TRUE.equals(ign) || (ign instanceof Number && ((Number) ign).intValue() == 1);
-                        } catch (Throwable ignored) {}
-                    }
-                    if (!ignOn && pwrSt == 2) {
-                        Object sys = getMicomBinder("com.hkmc.micom.system", "com.hkmc.micom.ISystemService$Stub");
-                        if (sys != null) {
-                            sys.getClass().getMethod("requestDelayModeOnADM").invoke(sys);
-                            detail = "stop=OK delayAdm=OK";
+                Object pObj = pwr.getClass().getMethod("getPowerStatus").invoke(pwr);
+                int pwrSt = pObj instanceof Number ? ((Number) pObj).intValue() : -1;
+                boolean ignOn = false;
+                Object bcm = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
+                if (bcm != null) {
+                    try {
+                        Object ign = bcm.getClass().getMethod("getIGNStatus").invoke(bcm);
+                        ignOn = Boolean.TRUE.equals(ign) || (ign instanceof Number && ((Number) ign).intValue() == 1);
+                    } catch (Throwable ignored) {}
+                }
+                // If IG ON just fired while MICOM is still in ADM (pwrSt==2), wait up to ~2.4s
+                // for MICOM to step directly 2 -> 0 instead of dipping 2 -> 6 (DELAY_MODE) -> 0.
+                if (ignOn && pwrSt == 2 && attempt < 8) {
+                    handler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (pwrKeepHeld || isPeerOpenLinkHoldingPower()) return;
+                            releaseMicomPwrKeepWhenReady(false, attempt + 1);
                         }
+                    }, 300L);
+                    return "deferred-until-pwr0(ps=2)";
+                }
+                pwr.getClass().getMethod("requestPwrKeepStop", int.class).invoke(pwr, Integer.valueOf(1));
+                detail = "stop=OK(ps=" + pwrSt + ")";
+                if (advanceAdmIfStillParked && !ignOn && pwrSt == 2) {
+                    Object sys = getMicomBinder("com.hkmc.micom.system", "com.hkmc.micom.ISystemService$Stub");
+                    if (sys != null) {
+                        sys.getClass().getMethod("requestDelayModeOnADM").invoke(sys);
+                        detail = "stop=OK delayAdm=OK";
                     }
                 }
             }
@@ -975,19 +1122,32 @@ public final class AndroidWifiPlatform implements WifiPlatform {
 
     @Override
     public boolean restoreSoftAp(int mode) {
-        try {
-            if (wifiManager != null) {
-                wifiManager.setWifiEnabled(false);
-            } else if (iWifiManager != null) {
-                iWifiManager.getClass().getMethod("setWifiEnabled", boolean.class).invoke(iWifiManager, false);
+        if (getWifiState() == WIFI_STATE_DISABLED
+                && getSoftApState() == AP_STATE_ENABLED
+                && getSoftApMode() == mode) {
+            return true;
+        }
+        if (getWifiState() != WIFI_STATE_DISABLED) {
+            try {
+                if (wifiManager != null) {
+                    wifiManager.setWifiEnabled(false);
+                } else if (iWifiManager != null) {
+                    iWifiManager.getClass().getMethod("setWifiEnabled", boolean.class).invoke(iWifiManager, false);
+                }
+                for (int t = 0; t < 24; t++) {
+                    if (getWifiState() == WIFI_STATE_DISABLED) break;
+                    Thread.sleep(150);
+                }
+            } catch (Throwable ignored) {
             }
-            for (int t = 0; t < 24; t++) {
-                if (getWifiState() == WIFI_STATE_DISABLED) break;
-                Thread.sleep(150);
-            }
-        } catch (Throwable ignored) {
+        }
+        if (getSoftApState() == AP_STATE_ENABLED && getSoftApMode() == mode) {
+            return true;
         }
 
+        if (savedApConfig == null) {
+            captureSoftApConfig();
+        }
         WifiConfiguration conf = savedApConfig;
         boolean ok = false;
         if (mode == 2) {

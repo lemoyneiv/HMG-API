@@ -478,8 +478,14 @@ public final class HomeWifiControllerTest {
             HomeWifiController ctl = new HomeWifiController(store, plat);
             ctl.start();
             ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            int ip = ipToInt(192, 168, 1, 55);
+            int gw = ipToInt(192, 168, 1, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, 10, "HomeNet", "aa:bb:cc:dd:ee:11",
+                    -56, 5180, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
 
-            // At +10 minutes (past Home Wi-Fi's own 5m, inside OpenLink's 30m): stays awake via OpenLink coordination!
+            // At +10 minutes AT HOME (past Home Wi-Fi's own 5m, inside OpenLink's 30m): stays connected via OpenLink coordination!
             plat.nowMs = 50000L + 10L * 60000L;
             Files.write(peerFile.toPath(),
                     ("{\"bootId\":\"boot-1\",\"active\":true,\"unlimited\":false,\"cutBy12vFloor\":false,"
@@ -488,7 +494,7 @@ public final class HomeWifiControllerTest {
             ctl.tickVehicleAndHealth();
             Map<String, Object> stExt = Json.object(ctl.statusJson());
             check("Extended by OpenLink peer lease", Boolean.TRUE, stExt.get("keepAwakeExtendedByOpenLink"));
-            checkTrue("Stays in client mode while OpenLink lease active", (Boolean) stExt.get("active"));
+            checkTrue("Stays in client mode at home while OpenLink lease active", (Boolean) stExt.get("active"));
 
             // Single 12V dip to 62% -> 1st sample debounced (does NOT cut yet!)
             plat.nowMs += 5000L;
@@ -583,7 +589,8 @@ public final class HomeWifiControllerTest {
             ctl.tickVehicleAndHealth();
             ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
 
-            // At +10 minutes away from home: Home Wi-Fi's own demand is false, but OpenLink lease keeps power held!
+            // At +10 minutes away from home: Home Wi-Fi's own demand is false and client Wi-Fi stops scanning,
+            // while OpenLink's active lease still keeps parked power held!
             plat.nowMs = olStart + 10L * 60000L;
             Files.write(peerFile.toPath(),
                     ("{\"bootId\":\"boot-1\",\"active\":true,\"unlimited\":false,\"cutBy12vFloor\":false,"
@@ -593,9 +600,34 @@ public final class HomeWifiControllerTest {
             Map<String, Object> ownKa = Json.object(HomeWifiStore.readText(new File(root, "data/hmgapi/public/keepawake.json")));
             check("Home Wi-Fi's own published lease is inactive away from home", Boolean.FALSE, ownKa.get("active"));
             checkTrue("OpenLink lease takes precedence and holds power", plat.holdParkedPower);
+            checkTrue("Client Wi-Fi stops scanning in store parking lot once awayTimedOut trips",
+                    !plat.holdWifiLock && plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED && !plat.softApActive);
+            check("wifi.json reports waiting (not searching) once awayTimedOut idles wlan0",
+                    "waiting", Json.object(HomeWifiStore.readText(new File(root, "data/hmgapi/public/wifi.json"))).get("state"));
+
+            // Store Stop #1 IG ON: peer lease deleted & car switches ON -> SoftAP Mode 2 restored immediately!
+            peerFile.delete();
+            plat.nowMs += 30000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 90, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("IG ON after away-from-home store stop immediately restores Mode 2 SoftAP",
+                    plat.softApActive && plat.softApMode == 2 && !plat.holdParkedPower);
+
+            // Stale persisted seen_networks.json from home must NOT delay awayTimedOut past 2m on next store stop:
+            store.saveSeenNetworks(Arrays.asList(
+                    new HomeWifiStore.SeenNetwork("MyHomeWiFi", "aa:bb:cc:dd:ee:99", 5500, -61, "[WPA2-PSK-CCMP][ESS]")));
+            HomeWifiController ctl2 = new HomeWifiController(store, plat);
+            plat.nowMs += 10000L;
+            long store2Start = plat.nowMs;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 88, false);
+            ctl2.tickVehicleAndHealth();
+            ctl2.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            plat.nowMs = store2Start + 121000L; // 2m 01s (< 3m!)
+            ctl2.tickVehicleAndHealth();
+            checkTrue("Stale persisted home scan cleared at session start so awayTimedOut trips at 2m (not 3m)",
+                    !plat.holdParkedPower && "sleep".equals(Json.object(ctl2.statusJson()).get("phase")));
 
             // 4. Mid-session router power loss at home: connects at home, then drops for > 3m without OpenLink -> sleeps!
-            peerFile.delete();
             plat.nowMs += 10000L;
             plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 90, false);
             ctl.tickVehicleAndHealth();
