@@ -51,6 +51,7 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private static final long STANDALONE_PROJ_UNMUTE_MS = 20000L;
     private static final File STANDALONE_BL_MARKER = new File("/dev/.hmgapi-wifi-bl");
     private static final File PROJECTION_RESUME_FILE = new File("/data/hmgapi/public/projection-resume.json");
+    private static final File BT_STANDBY_RESTORE_MARKER = new File("/data/hmgapi/public/bt-standby-restore");
 
     private final Context context;
     private final WifiManager wifiManager;
@@ -600,11 +601,11 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             captureSoftApConfig();
         }
         if (currentMode == 2) {
-            if (savedApConfig != null && invokeSoftAp("setWifiApEnabledForConnectivity", savedApConfig, false)) return true;
             if (invokeSoftAp("setWifiApEnabledForConnectivity", null, false)) return true;
+            if (savedApConfig != null && invokeSoftAp("setWifiApEnabledForConnectivity", savedApConfig, false)) return true;
         }
-        if (savedApConfig != null && invokeSoftAp("setWifiApEnabled", savedApConfig, false)) return true;
-        return invokeSoftAp("setWifiApEnabled", null, false);
+        if (invokeSoftAp("setWifiApEnabled", null, false)) return true;
+        return savedApConfig != null && invokeSoftAp("setWifiApEnabled", savedApConfig, false);
     }
 
     @Override
@@ -972,10 +973,38 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     }
 
     private void recoverStandaloneBacklightMarkerIfOn() {
-        if (!STANDALONE_BL_MARKER.isFile()) return;
         String p = readDirectMicomPowerNameFallback();
-        if ("on".equals(p) || "logic_on".equals(p) || p.isEmpty()) {
+        boolean isOn = "on".equals(p) || "logic_on".equals(p) || p.isEmpty() || isDirectMicomIgnitionOn();
+        if (STANDALONE_BL_MARKER.isFile() && isOn) {
             restoreStandaloneDarkIfNeeded();
+        }
+        if (BT_STANDBY_RESTORE_MARKER.isFile() && isOn && !isPeerOpenLinkHoldingPower()) {
+            try {
+                String raw = HomeWifiStore.readText(BT_STANDBY_RESTORE_MARKER).trim();
+                String curBoot = bootId();
+                boolean prevBootMarker = raw.isEmpty() || !raw.contains(curBoot);
+                boolean openLinkMissing = !new File("/data/hmgapi/mods/hmgapi-openlink/mod.json").isFile();
+                if (prevBootMarker || openLinkMissing) {
+                    Object b = Class.forName("android.os.ServiceManager")
+                            .getMethod("getService", String.class)
+                            .invoke(null, "bluetooth_manager");
+                    if (b != null) {
+                        Object bt = Class.forName("android.bluetooth.IBluetoothManager$Stub")
+                                .getMethod("asInterface", IBinder.class)
+                                .invoke(null, b);
+                        if (bt != null) {
+                            try {
+                                bt.getClass().getMethod("enable").invoke(bt);
+                            } catch (NoSuchMethodException e) {
+                                bt.getClass().getMethod("enable", String.class).invoke(bt, "android");
+                            }
+                            BT_STANDBY_RESTORE_MARKER.delete();
+                            log("Recovered Bluetooth state from bt-standby-restore marker");
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -1145,18 +1174,37 @@ public final class AndroidWifiPlatform implements WifiPlatform {
             return true;
         }
 
-        if (savedApConfig == null) {
-            captureSoftApConfig();
-        }
-        WifiConfiguration conf = savedApConfig;
         boolean ok = false;
         if (mode == 2) {
-            ok = invokeSoftAp("setWifiApEnabledForConnectivity", conf, true);
-            if (!ok) {
-                ok = invokeSoftAp("setWifiApEnabled", conf, true);
+            ok = invokeSoftApOnTarget(iWifiManager, "setWifiApEnabledForConnectivity", null, true)
+                    || invokeSoftAp("setWifiApEnabledForConnectivity", null, true);
+            if (ok) {
+                try {
+                    for (int t = 0; t < 6; t++) {
+                        int st = getSoftApState();
+                        if (st == AP_STATE_ENABLED) return true;
+                        if (st == AP_STATE_ENABLING) break;
+                        Thread.sleep(150);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (getSoftApState() != AP_STATE_ENABLED && getSoftApState() != AP_STATE_ENABLING) {
+                if (savedApConfig == null) captureSoftApConfig();
+                WifiConfiguration conf = savedApConfig;
+                ok = invokeSoftAp("setWifiApEnabledForConnectivity", conf, true);
+                if (!ok) {
+                    ok = invokeSoftAp("setWifiApEnabled", conf, true);
+                }
             }
         } else {
-            ok = invokeSoftAp("setWifiApEnabled", conf, true);
+            ok = invokeSoftApOnTarget(iWifiManager, "setWifiApEnabled", null, true)
+                    || invokeSoftAp("setWifiApEnabled", null, true);
+            if (!ok) {
+                if (savedApConfig == null) captureSoftApConfig();
+                ok = invokeSoftAp("setWifiApEnabled", savedApConfig, true);
+            }
         }
         try {
             for (int t = 0; t < 26; t++) {
@@ -1169,14 +1217,21 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         return ok;
     }
 
+    private static boolean invokeSoftApOnTarget(Object target, String methodName, WifiConfiguration conf, boolean enabled) {
+        if (target == null) return false;
+        try {
+            Method m = target.getClass().getMethod(methodName, WifiConfiguration.class, boolean.class);
+            Object res = m.invoke(target, conf, Boolean.valueOf(enabled));
+            return !(res instanceof Boolean) || ((Boolean) res).booleanValue();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private boolean invokeSoftAp(String methodName, WifiConfiguration conf, boolean enabled) {
-        for (Object target : new Object[] { wifiManager, iWifiManager }) {
-            if (target == null) continue;
-            try {
-                Method m = target.getClass().getMethod(methodName, WifiConfiguration.class, boolean.class);
-                Object res = m.invoke(target, conf, Boolean.valueOf(enabled));
-                return !(res instanceof Boolean) || ((Boolean) res).booleanValue();
-            } catch (Throwable ignored) {
+        for (Object target : new Object[] { iWifiManager, wifiManager }) {
+            if (invokeSoftApOnTarget(target, methodName, conf, enabled)) {
+                return true;
             }
         }
         return false;
