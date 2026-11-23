@@ -23,6 +23,8 @@ import java.util.Set;
  */
 public final class HomeWifiController implements WifiPlatform.Events {
     public static final long AP_DISABLE_FALLBACK_MS = 3500L;
+    public static final long AP_DISABLE_POLL_MS = 1000L;
+    public static final int AP_DISABLE_MAX_POLLS = 75;
     public static final long WIFI_ENABLE_POLL_MS = 400L;
     public static final long SCAN_INTERVAL_MS = 4000L;
     public static final long AWAY_PEER_SCAN_INTERVAL_MS = 60000L;
@@ -63,6 +65,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private long powerOffSinceMs = -1L;
     private boolean doorOpenedWhileOff = false;
     private boolean manualActive = false;
+    private boolean manualStartedWhilePowerOn = false;
     private long manualDeadlineMs = 0L; // 0 = unlimited while in P
     private boolean sessionActive = false;
     private int savedApMode = 2;
@@ -87,6 +90,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private int handshakeDropCount = 0;
     private int scanCount = 0;
     private int enablePollCount = 0;
+    private int apDisablePollCount = 0;
 
     private String connectedIp = "";
     private String connectedGateway = "";
@@ -326,10 +330,27 @@ public final class HomeWifiController implements WifiPlatform.Events {
             store.mergeSystemNetworks(platform.getConfiguredNetworks());
         }
 
-        // Check manual session expiration or gear shift out of Park
+        // Check manual session expiration, IG_ON/IG_OFF power transitions, or gear shift out of Park
         if (manualActive) {
-            if (veh.isPowerOn() && !veh.gearPark) {
+            if (veh.isPowerOn() && !manualStartedWhilePowerOn) {
                 manualActive = false;
+                manualStartedWhilePowerOn = false;
+                manualDeadlineMs = 0L;
+                pinnedSsid = null;
+                if (sessionActive) {
+                    exitClientSession("Car switched on", true);
+                    scheduleVehicleTick();
+                    return;
+                }
+            } else if (!veh.isPowerOn() && manualStartedWhilePowerOn) {
+                // Hand off cleanly to normal parked keep-awake / 2m away-from-home rules
+                manualActive = false;
+                manualStartedWhilePowerOn = false;
+                manualDeadlineMs = 0L;
+                pinnedSsid = null;
+            } else if (veh.isPowerOn() && !veh.gearPark) {
+                manualActive = false;
+                manualStartedWhilePowerOn = false;
                 manualDeadlineMs = 0L;
                 pinnedSsid = null;
                 if (sessionActive) {
@@ -337,6 +358,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 }
             } else if (manualDeadlineMs > 0 && nowElapsed >= manualDeadlineMs) {
                 manualActive = false;
+                manualStartedWhilePowerOn = false;
                 manualDeadlineMs = 0L;
                 pinnedSsid = null;
                 if (sessionActive && veh.isPowerOn()) {
@@ -354,6 +376,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             String ownPlugged = hasHomeProfile ? store.getKeepAwakePlugged() : "off";
             boolean wifiConnected = sessionActive && "connected".equals(phase);
             boolean homeSeenOrAssoc = isHomeNetworkSeenOrAssociating();
+            boolean waitingForApStop = sessionActive && "disabling_ap".equals(phase);
             peerLease = store.readPeerOpenLinkLease();
             lastKeepAwakeVerdict = keepAwake.evaluate(
                     veh,
@@ -363,7 +386,13 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     ownPlugged,
                     peerLease,
                     wifiConnected,
-                    homeSeenOrAssoc);
+                    homeSeenOrAssoc,
+                    waitingForApStop);
+            if (manualActive && !manualStartedWhilePowerOn && !lastKeepAwakeVerdict.shouldStayInClientMode) {
+                // RAP UI scan handed off to parked sleep (e.g. away from home after 2m)
+                manualActive = false;
+                manualDeadlineMs = 0L;
+            }
             store.writeKeepAwakeLease(curBoot, lastKeepAwakeVerdict, veh, nowElapsed);
             String verdictSig = lastKeepAwakeVerdict.shouldStayInClientMode + "|"
                     + lastKeepAwakeVerdict.holdPower + "|"
@@ -572,32 +601,30 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         if (!pendingApRestoreOnPowerOn) {
             boolean apOn = platform.isSoftApActiveOrEnabling();
+            boolean apDisabling = platform.getSoftApState() == WifiPlatform.AP_STATE_DISABLING;
             int mode = platform.getSoftApMode();
             if (mode != 1 && mode != 2) mode = 2;
-            savedApMode = apOn ? mode : 2;
+            savedApMode = (apOn || apDisabling) ? mode : 2;
             platform.captureSoftApConfig();
             store.saveApMode(savedApMode);
             store.saveActiveBootId(platform.bootId());
-            platform.log("Starting Home Wi-Fi (" + reason + "; prior SoftAP=" + (apOn ? ("mode " + savedApMode) : "off") + ")");
-            String startMsg = "reason=\"" + reason + "\" priorSoftAp=" + (apOn ? ("mode" + savedApMode) : "off")
+            String priorLabel = apOn ? ("mode " + savedApMode) : (apDisabling ? ("disabling mode " + savedApMode) : "off");
+            platform.log("Starting Home Wi-Fi (" + reason + "; prior SoftAP=" + priorLabel + ")");
+            String startMsg = "reason=\"" + reason + "\" priorSoftAp="
+                    + ((apOn || apDisabling) ? ("mode" + savedApMode) : "off")
                     + " power=" + (lastVehicle.power.isEmpty() ? "on" : lastVehicle.power)
                     + " plugged=" + lastVehicle.pluggedIn;
             recordFlight("SESSION_START", startMsg, startMsg, true);
-            if (apOn) {
+            if (apOn || apDisabling) {
                 phase = "disabling_ap";
                 headline = "Preparing Wi-Fi…";
                 detail = "Pausing wireless CarPlay / Android Auto hotspot…";
                 store.writePublicStatus(store.hasUsableHomeProfile() ? "searching" : "nonetworks", 0, 0);
-                platform.disableSoftAp(savedApMode);
-                platform.scheduleDelayed(TAG_AP_FALLBACK, AP_DISABLE_FALLBACK_MS, new Runnable() {
-                    @Override
-                    public void run() {
-                        synchronized (HomeWifiController.this) {
-                            if (!sessionActive || !"disabling_ap".equals(phase)) return;
-                            enableStationHardware();
-                        }
-                    }
-                });
+                if (apOn) {
+                    platform.disableSoftAp(savedApMode);
+                }
+                apDisablePollCount = 0;
+                scheduleApDisablePoll();
                 return;
             }
         } else {
@@ -609,6 +636,48 @@ public final class HomeWifiController implements WifiPlatform.Events {
             recordFlight("SESSION_START", resumeMsg, resumeMsg, true);
         }
         enableStationHardware();
+    }
+
+    private boolean isSoftApBusy() {
+        int st = platform.getSoftApState();
+        return st == WifiPlatform.AP_STATE_DISABLING
+                || st == WifiPlatform.AP_STATE_ENABLING
+                || st == WifiPlatform.AP_STATE_ENABLED
+                || platform.isSoftApActiveOrEnabling();
+    }
+
+    /**
+     * Polls SoftAP state while in {@code disabling_ap} so {@code setWifiEnabled(true)} is never
+     * called while Android 4.4 {@code WifiStateMachine} is still inside {@code SoftApStoppingState}
+     * ({@code AP_STATE_DISABLING == 10}, e.g. waiting for {@code GalReceiver} / {@code hostapd}
+     * socket teardown).
+     */
+    private void scheduleApDisablePoll() {
+        platform.scheduleDelayed(TAG_AP_FALLBACK, AP_DISABLE_POLL_MS, new Runnable() {
+            @Override
+            public void run() {
+                synchronized (HomeWifiController.this) {
+                    if (!sessionActive || !"disabling_ap".equals(phase)) return;
+                    if (!isSoftApBusy()) {
+                        enableStationHardware();
+                        return;
+                    }
+                    apDisablePollCount++;
+                    int st = platform.getSoftApState();
+                    if ((st == WifiPlatform.AP_STATE_ENABLED || st == WifiPlatform.AP_STATE_ENABLING)
+                            && apDisablePollCount == 6) {
+                        platform.disableSoftAp(savedApMode);
+                    }
+                    if (apDisablePollCount < AP_DISABLE_MAX_POLLS) {
+                        scheduleApDisablePoll();
+                    } else {
+                        String timeoutMsg = "polls=" + apDisablePollCount + " apState=" + st;
+                        recordFlight("AP_DISABLE_TIMEOUT", timeoutMsg, timeoutMsg, true);
+                        enableStationHardware();
+                    }
+                }
+            }
+        });
     }
 
     private void exitClientSession(String reason) {
@@ -715,6 +784,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         platform.cancelScheduled(TAG_WIFI_ENABLE);
         if (!sessionActive) return;
 
+        keepAwake.notifyStationHardwareReady(platform.elapsedRealtimeMs());
         syncProfilesAndEnforceExclusions();
         String readyMsg = "savedProfiles=" + store.listProfiles().size();
         recordFlight("WIFI_READY", readyMsg, readyMsg, false);
@@ -1135,20 +1205,15 @@ public final class HomeWifiController implements WifiPlatform.Events {
         recordFlight("SOFTAP_RECLAIM", msg, msg, true);
         platform.log("Reclaiming wlan0 for Home Wi-Fi (" + msg + ")");
 
-        if (platform.isSoftApActiveOrEnabling()) {
+        if (isSoftApBusy()) {
             phase = "disabling_ap";
             headline = "Reclaiming Wi-Fi…";
             detail = "Pausing wireless projection hotspot to restore Home Wi-Fi…";
-            platform.disableSoftAp(savedApMode);
-            platform.scheduleDelayed(TAG_AP_FALLBACK, AP_DISABLE_FALLBACK_MS, new Runnable() {
-                @Override
-                public void run() {
-                    synchronized (HomeWifiController.this) {
-                        if (!sessionActive || !"disabling_ap".equals(phase)) return;
-                        enableStationHardware();
-                    }
-                }
-            });
+            if (platform.isSoftApActiveOrEnabling()) {
+                platform.disableSoftAp(savedApMode);
+            }
+            apDisablePollCount = 0;
+            scheduleApDisablePoll();
         } else {
             enableStationHardware();
         }
@@ -1644,6 +1709,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
         if ("back".equals(verb)) {
             manualActive = false;
+            manualStartedWhilePowerOn = false;
             manualDeadlineMs = 0L;
             pinnedSsid = null;
             WifiPlatform.VehicleSnapshot veh = platform.readVehicle();
@@ -1751,6 +1817,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
 
         manualActive = true;
+        manualStartedWhilePowerOn = veh.isPowerOn();
         manualDeadlineMs = mins == 0 ? 0L : (platform.elapsedRealtimeMs() + mins * 60000L);
         pausedAutoLower.clear();
 

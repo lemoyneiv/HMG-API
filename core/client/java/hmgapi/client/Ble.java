@@ -216,13 +216,16 @@ public final class Ble implements Closeable {
 
     private final Listener listener;
     private final Closeable underlying;
+    private final Closeable wakeUnderlying;
     private final BufferedReader reader;
     private final BufferedWriter writer;
     private final Object writeLock = new Object();
     private final AtomicBoolean running = new AtomicBoolean(true);
+    private volatile Thread readerThread;
 
-    private Ble(Closeable underlying, BufferedReader reader, BufferedWriter writer, Listener listener) {
+    private Ble(Closeable underlying, Closeable wakeUnderlying, BufferedReader reader, BufferedWriter writer, Listener listener) {
         this.underlying = underlying;
+        this.wakeUnderlying = wakeUnderlying;
         this.reader = reader;
         this.writer = writer;
         this.listener = listener;
@@ -253,12 +256,19 @@ public final class Ble implements Closeable {
      * this caller's mod is off or didn't declare {@code "ble": {"central": true}}.
      */
     public static Ble connect(Listener listener) throws IOException {
-        LocalSocket sock = new LocalSocket();
+        final LocalSocket sock = new LocalSocket();
         boolean ok = false;
         try {
             sock.connect(new LocalSocketAddress(SOCKET, LocalSocketAddress.Namespace.ABSTRACT));
             sock.setSoTimeout(5000);
-            Ble ble = attach(sock.getInputStream(), sock.getOutputStream(), sock, listener);
+            Closeable wakeOnly = new Closeable() {
+                @Override
+                public void close() {
+                    try { sock.shutdownOutput(); } catch (Throwable ignored) {}
+                    try { sock.shutdownInput(); } catch (Throwable ignored) {}
+                }
+            };
+            Ble ble = attachInternal(sock.getInputStream(), sock.getOutputStream(), sock, wakeOnly, listener);
             sock.setSoTimeout(0);
             ok = true;
             return ble;
@@ -271,6 +281,11 @@ public final class Ble implements Closeable {
 
     /** Attaches a {@link Ble} session to an arbitrary stream pair (used by off-car tests). */
     public static Ble attach(InputStream in, OutputStream out, Closeable closeable, Listener listener) throws IOException {
+        return attachInternal(in, out, closeable, null, listener);
+    }
+
+    private static Ble attachInternal(InputStream in, OutputStream out, Closeable closeable,
+                                      Closeable wakeOnly, Listener listener) throws IOException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"), 2048);
         BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, "UTF-8"), 1024);
 
@@ -292,7 +307,7 @@ public final class Ble implements Closeable {
         writer.write("MULTICONN 1\n");
         writer.flush();
 
-        final Ble ble = new Ble(closeable, reader, writer, listener);
+        final Ble ble = new Ble(closeable, wakeOnly, reader, writer, listener);
         if (listener != null) {
             try { listener.onSessionReady(); } catch (Throwable ignored) {}
         }
@@ -336,6 +351,7 @@ public final class Ble implements Closeable {
             }
         };
         rx.setDaemon(true);
+        readerThread = rx;
         rx.start();
     }
 
@@ -343,7 +359,14 @@ public final class Ble implements Closeable {
     public void close() {
         if (!running.getAndSet(false)) return;
         sendRawCommand("CLOSE");
-        closeStreamsQuietly();
+        Thread rx = readerThread;
+        if (wakeUnderlying != null && rx != null && rx.isAlive() && rx != Thread.currentThread()) {
+            // Wake blocked LocalSocket read cleanly via shutdown(SHUT_RDWR) without nulling
+            // LocalSocketImpl.fd mid-JNI on KitKat; rx's finally block closes the socket.
+            try { wakeUnderlying.close(); } catch (Throwable ignored) {}
+        } else {
+            closeStreamsQuietly();
+        }
     }
 
     public boolean isOpen() {
@@ -351,6 +374,9 @@ public final class Ble implements Closeable {
     }
 
     private void closeStreamsQuietly() {
+        if (wakeUnderlying != null) {
+            try { wakeUnderlying.close(); } catch (Throwable ignored) {}
+        }
         try { writer.close(); } catch (Throwable ignored) {}
         try { reader.close(); } catch (Throwable ignored) {}
         if (underlying != null) {

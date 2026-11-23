@@ -154,7 +154,8 @@ final class BleHooks {
     }
 
     private static void dispatchClient(final BleCentral c, final LocalSocket s) {
-        final Closeable closer = singleClose(s);
+        final Closeable wakeCloser = wakeOnlyClose(s);
+        final Closeable finalCloser = singleClose(s);
         Thread worker = new Thread("hmgapi-ble-client") {
             @Override
             public void run() {
@@ -169,11 +170,11 @@ final class BleHooks {
                         if (pm != null) pkgs = pm.getPackagesForUid(uid);
                     }
                     String owner = BleAuth.authorize(uid, pid, pkgs, authState, BleAuth.SYSTEM_ENV);
-                    c.serve(s.getInputStream(), s.getOutputStream(), closer, owner);
+                    c.serve(s.getInputStream(), s.getOutputStream(), wakeCloser, owner);
                 } catch (Throwable t) {
                     HmgApi.e("ble client", t);
                 } finally {
-                    try { closer.close(); } catch (IOException ignored) {}
+                    try { finalCloser.close(); } catch (IOException ignored) {}
                 }
             }
         };
@@ -182,9 +183,27 @@ final class BleHooks {
     }
 
     /**
-     * Closes an accepted LocalSocket's fd at most once. On KitKat (API 19),
-     * {@code LocalServerSocket.accept()} leaves the accepted fd unowned, so
-     * {@code LocalSocket.close()} alone leaks the fd without sending EOF (#164).
+     * Cross-thread wakeup handle passed into {@link BleCentral#serve}: calls only
+     * {@code shutdownInput()}/{@code shutdownOutput()} so a blocked {@code read()} in
+     * {@code hmgapi-ble-client} returns EOF cleanly without nulling {@code LocalSocketImpl.fd}
+     * mid-JNI ({@code jniGetFDFromFileDescriptor} SIGSEGV on Android 4.4 KitKat).
+     */
+    private static Closeable wakeOnlyClose(final LocalSocket s) {
+        final AtomicBoolean done = new AtomicBoolean(false);
+        return new Closeable() {
+            @Override
+            public void close() {
+                if (!done.compareAndSet(false, true)) return;
+                try { s.shutdownOutput(); } catch (Throwable ignored) {}
+                try { s.shutdownInput(); } catch (Throwable ignored) {}
+            }
+        };
+    }
+
+    /**
+     * Closes an accepted LocalSocket's fd at most once after the reader thread has exited.
+     * On KitKat (API 19), {@code LocalServerSocket.accept()} leaves the accepted fd unowned,
+     * so {@code LocalSocket.close()} alone leaks the fd without sending EOF (#164).
      */
     private static Closeable singleClose(final LocalSocket s) {
         final AtomicBoolean done = new AtomicBoolean(false);
@@ -192,7 +211,10 @@ final class BleHooks {
             @Override
             public void close() {
                 if (!done.compareAndSet(false, true)) return;
-                java.io.FileDescriptor fd = s.getFileDescriptor();
+                java.io.FileDescriptor fd = null;
+                try { fd = s.getFileDescriptor(); } catch (Throwable ignored) {}
+                try { s.shutdownOutput(); } catch (Throwable ignored) {}
+                try { s.shutdownInput(); } catch (Throwable ignored) {}
                 try {
                     if (fd != null && fd.valid() && libcore.io.Libcore.os != null) {
                         libcore.io.Libcore.os.close(fd);

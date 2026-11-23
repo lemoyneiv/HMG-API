@@ -52,6 +52,7 @@ public final class HomeWifiControllerTest {
         testAdmPreLatchDoorOpenAndSoftApHijackReclaim();
         testAdbOverWifiLifecycleAndScrubbing();
         testLockedCabinIccuPlugLatchAndNoZombieReentry();
+        testSlowSoftApDisablingAndRapManualScanHandoff();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -1093,6 +1094,88 @@ public final class HomeWifiControllerTest {
                 !new File(fw, "props/ctl.stop").exists());
     }
 
+    private static void testSlowSoftApDisablingAndRapManualScanHandoff() throws Exception {
+        File root = Files.createTempDirectory("hw-ap-disabling").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            plat.holdDisablingOnStop = true; // disableSoftAp enters AP_STATE_DISABLING (10) instead of instant 11
+            plat.nowMs = 10000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", true, true, false, false, 85, false);
+
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.handleCommand(Arrays.asList("join", "GarageNet", "garage-pass-99"));
+            ctl.start();
+
+            check("Enters disabling_ap on park while SoftAP is stopping",
+                    "disabling_ap", Json.object(ctl.statusJson()).get("phase"));
+            check("Zero premature setWifiEnabled(true) calls initially",
+                    Integer.valueOf(0), Integer.valueOf(plat.setWifiEnabledCalls));
+
+            // Simulate 62 seconds of GalReceiver / hostapd socket teardown while apState == AP_STATE_DISABLING (10)
+            for (int sec = 1; sec <= 62; sec++) {
+                plat.nowMs += 1000L;
+                plat.fireTimer(HomeWifiController.TAG_AP_FALLBACK);
+                ctl.tickVehicleAndHealth();
+            }
+            check("Stays in disabling_ap across 62s AP_STATE_DISABLING without wedging WifiStateMachine",
+                    "disabling_ap", Json.object(ctl.statusJson()).get("phase"));
+            check("setWifiEnabled(true) NEVER called while SoftAP is still AP_STATE_DISABLING",
+                    Integer.valueOf(0), Integer.valueOf(plat.setWifiEnabledCalls));
+
+            // At +63s SoftAP finally reaches AP_STATE_DISABLED (11)
+            plat.softApStateOverride = WifiPlatform.AP_STATE_DISABLED;
+            plat.nowMs += 1000L;
+            plat.fireTimer(HomeWifiController.TAG_AP_FALLBACK);
+            check("setWifiEnabled(true) called cleanly once SoftAP reaches AP_STATE_DISABLED",
+                    Integer.valueOf(1), Integer.valueOf(plat.setWifiEnabledCalls));
+
+            // Verify slow 63s SoftAP teardown did NOT eat into wpa_supplicant's 120s scan window:
+            // advancing +100s (total 163s since park, but only 100s since WIFI_READY) must still be scanning!
+            plat.nowMs += 100000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Full 2-minute scan window preserved after slow SoftAP stop",
+                    plat.holdWifiLock && !"sleep".equals(Json.object(ctl.statusJson()).get("phase")));
+
+            // Connect to GarageNet cleanly
+            int ip = ipToInt(192, 168, 1, 88);
+            int gw = ipToInt(192, 168, 1, 1);
+            plat.conn = new WifiPlatform.ConnectionSnapshot(
+                    WifiPlatform.SupState.COMPLETED, plat.lastEnabledNetId, "GarageNet", "aa:bb:cc:dd:ee:88",
+                    -58, 5180, ip, ip, gw, ipToInt(255, 255, 255, 0), gw, 0);
+            ctl.onSupplicantStateChanged(WifiPlatform.SupState.COMPLETED, false);
+            check("Connected after slow SoftAP stop", "connected", Json.object(ctl.statusJson()).get("phase"));
+
+            // Now test RAP manual scan ("Live Wi-Fi scan in Park" while power=adm) auto-exiting on IG_ON:
+            plat.holdDisablingOnStop = false;
+            plat.softApStateOverride = -1;
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 85, false);
+            ctl.tickVehicleAndHealth();
+            checkTrue("Driving restores SoftAP", plat.softApActive);
+
+            // Enter RAP (power=adm, parked=false, doors closed) and open Home Wi-Fi UI scan
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("adm", false, true, false, false, 85, false, 1, 1);
+            ctl.tickVehicleAndHealth();
+            ctl.handleCommand(Arrays.asList("now", "0")); // manual scan started while power=adm (!isPowerOn)
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            checkTrue("Manual scan active in RAP", !plat.softApActive && plat.wifiState == WifiPlatform.WIFI_STATE_ENABLED);
+
+            // Driver switches car back ON (IG_ON) while still in Park (gearPark=true):
+            // Must immediately exit client mode and restore Mode 2 SoftAP for Wireless AA/CarPlay!
+            plat.nowMs += 5000L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 85, false, 1, 1);
+            ctl.tickVehicleAndHealth();
+            checkTrue("RAP manual scan automatically restores Mode 2 SoftAP on IG_ON in Park",
+                    plat.softApActive && plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED);
+            check("Phase returns to standby on IG_ON after RAP scan",
+                    "standby", Json.object(ctl.statusJson()).get("phase"));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
     private static int ipToInt(int a, int b, int c, int d) {
         return (a & 0xFF) | ((b & 0xFF) << 8) | ((c & 0xFF) << 16) | ((d & 0xFF) << 24);
     }
@@ -1128,9 +1211,12 @@ public final class HomeWifiControllerTest {
         String bootId = "boot-1";
         VehicleSnapshot vehicle = new VehicleSnapshot("on", false, true);
         boolean softApActive = true;
+        int softApStateOverride = -1; // -1 = derive from softApActive (13 vs 11)
+        boolean holdDisablingOnStop = false;
         int softApMode = 2;
         int lastRestoredApMode = -1;
         int wifiState = WIFI_STATE_DISABLED;
+        int setWifiEnabledCalls = 0;
         boolean holdWifiLock = false;
         boolean holdParkedPower = false;
         int nextNetId = 10;
@@ -1166,12 +1252,22 @@ public final class HomeWifiControllerTest {
         @Override public String bootId() { return bootId; }
         @Override public VehicleSnapshot readVehicle() { return vehicle; }
         @Override public boolean isSoftApActiveOrEnabling() { return softApActive; }
+        @Override
+        public int getSoftApState() {
+            if (softApStateOverride >= 0) return softApStateOverride;
+            return softApActive ? AP_STATE_ENABLED : AP_STATE_DISABLED;
+        }
         @Override public int getSoftApMode() { return softApMode; }
         @Override public void captureSoftApConfig() {}
 
         @Override
         public boolean disableSoftAp(int currentMode) {
             softApActive = false;
+            if (holdDisablingOnStop) {
+                softApStateOverride = AP_STATE_DISABLING;
+            } else if (softApStateOverride == AP_STATE_DISABLING) {
+                softApStateOverride = AP_STATE_DISABLED;
+            }
             return true;
         }
 
@@ -1185,6 +1281,7 @@ public final class HomeWifiControllerTest {
             }
             wifiState = WIFI_STATE_DISABLED;
             softApActive = true;
+            softApStateOverride = -1;
             softApMode = mode;
             lastRestoredApMode = mode;
             return true;
@@ -1205,6 +1302,7 @@ public final class HomeWifiControllerTest {
 
         @Override
         public boolean setWifiEnabled(boolean enabled) {
+            if (enabled) setWifiEnabledCalls++;
             wifiState = enabled ? WIFI_STATE_ENABLED : WIFI_STATE_DISABLED;
             if (enabled && listener != null) {
                 listener.onWifiStateChanged(WIFI_STATE_ENABLED);

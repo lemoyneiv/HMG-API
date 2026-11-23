@@ -143,6 +143,7 @@ public interface WifiPlatform {
     VehicleSnapshot readVehicle();
 
     boolean isSoftApActiveOrEnabling();
+    int getSoftApState();
     int getSoftApMode();
     void captureSoftApConfig();
     boolean disableSoftAp(int currentMode);

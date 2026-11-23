@@ -357,6 +357,7 @@ public final class HomeWifiDaemon {
         @Override public String bootId() { return "offline"; }
         @Override public VehicleSnapshot readVehicle() { return new VehicleSnapshot("on", false, false); }
         @Override public boolean isSoftApActiveOrEnabling() { return true; }
+        @Override public int getSoftApState() { return AP_STATE_ENABLED; }
         @Override public int getSoftApMode() { return 2; }
         @Override public void captureSoftApConfig() {}
         @Override public boolean disableSoftAp(int currentMode) { return false; }

@@ -83,6 +83,11 @@ final class HmgApi {
         } catch (Throwable t) {
             e("projection AP", t);
         }
+        try {
+            BtStandby.zygote();   // suppress BTCM 2s auto-enable while /dev/.openlink-bt or /dev/.bounce-bt active
+        } catch (Throwable t) {
+            e("bt standby", t);
+        }
         Points.hook(null, "framework.activity_thread.handle_bind_application",
                 new MethodHook() {
                     @Override

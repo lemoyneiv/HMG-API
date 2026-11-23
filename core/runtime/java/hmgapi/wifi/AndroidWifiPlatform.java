@@ -546,7 +546,8 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
-    private int getSoftApState() {
+    @Override
+    public int getSoftApState() {
         if (wifiManager != null) {
             try {
                 Object res = wifiManager.getClass().getMethod("getWifiApState").invoke(wifiManager);
@@ -595,12 +596,37 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         }
     }
 
+    private static void disconnectWirelessProjectionQuietly() {
+        try {
+            Object pp = getMicomBinder("phoneprojection", "android.phoneprojection.IPPManager$Stub");
+            if (pp == null) return;
+            Class<?> cls = pp.getClass();
+            String aa = "";
+            String cp = "";
+            try {
+                Object r = cls.getMethod("getAAConnectedBTAddress").invoke(pp);
+                if (r instanceof String) aa = ((String) r).trim();
+            } catch (Throwable ignored) {}
+            try {
+                Object r = cls.getMethod("getCPConnectedBTAddress").invoke(pp);
+                if (r instanceof String) cp = ((String) r).trim();
+            } catch (Throwable ignored) {}
+            boolean hasAa = aa.length() == 17 && !"00:00:00:00:00:00".equals(aa);
+            boolean hasCp = cp.length() == 17 && !"00:00:00:00:00:00".equals(cp);
+            if (hasAa || hasCp) {
+                cls.getMethod("disconnectWirelessAll").invoke(pp);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     @Override
     public boolean disableSoftAp(int currentMode) {
         if (savedApConfig == null) {
             captureSoftApConfig();
         }
         if (currentMode == 2) {
+            disconnectWirelessProjectionQuietly();
             if (invokeSoftAp("setWifiApEnabledForConnectivity", null, false)) return true;
             if (savedApConfig != null && invokeSoftAp("setWifiApEnabledForConnectivity", savedApConfig, false)) return true;
         }

@@ -59,7 +59,7 @@ import java.util.TreeMap;
  * names the lpatch binary.
  */
 public final class Engine {
-    public static final String HMGAPI_VERSION = "1.1.1-rc.19";
+    public static final String HMGAPI_VERSION = "1.1.1-rc.20";
     /**
      * The release a pre-release leads to (1.1.0 for 1.1.0-rc.1): what a mod's "hmgapi"
      * range of final versions is checked against (Version.meetsHmgapi). Updates compare

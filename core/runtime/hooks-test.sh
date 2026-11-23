@@ -81,4 +81,19 @@ javac --release 8 -Xlint:-options -nowarn -cp "$CP" -d "$CP" \
     core/runtime/java/hmgapi/hook/LauncherReloadState.java \
     core/runtime/test/hmgapi/hook/LauncherReloadTest.java
 java -cp "$CP" hmgapi.hook.LauncherReloadTest || fail=1
+
+# volatile Bluetooth standby/bounce non-root enable() suppression (hook.BtStandby)
+mkdir -p "$T/bt/android/bluetooth" "$T/bt/android/os" "$T/bt/hmgapi/hook" "$T/bt-cls"
+printf 'package android.bluetooth;\npublic class BluetoothAdapter { public boolean enable() { return true; } }\n' > "$T/bt/android/bluetooth/BluetoothAdapter.java"
+printf 'package android.os;\npublic class Process { public static int myUid() { return 1002; } }\n' > "$T/bt/android/os/Process.java"
+printf 'package hmgapi.hook;\npublic class Hooks { public static void findAndHookMethod(Class<?> c, String n, Object... p) {} }\n' > "$T/bt/hmgapi/hook/Hooks.java"
+printf 'package hmgapi.hook;\npublic class HmgApi { static void i(String m) {} static void e(String m, Throwable t) {} }\n' > "$T/bt/hmgapi/hook/HmgApi.java"
+javac --release 8 -Xlint:-options -nowarn -cp "$CP:$T/sms" -d "$T/bt-cls" \
+    "$T/bt/android/bluetooth/BluetoothAdapter.java" \
+    "$T/bt/android/os/Process.java" \
+    "$T/bt/hmgapi/hook/Hooks.java" \
+    "$T/bt/hmgapi/hook/HmgApi.java" \
+    core/runtime/java/hmgapi/hook/BtStandby.java \
+    core/runtime/test/hmgapi/hook/BtStandbyTest.java
+java -cp "$CP:$T/sms:$T/bt-cls" hmgapi.hook.BtStandbyTest || fail=1
 exit $fail

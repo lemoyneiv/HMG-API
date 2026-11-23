@@ -33,6 +33,8 @@ public class LocalSocket implements Closeable {
     public void setSoTimeout(int ms) throws IOException {}
     public InputStream getInputStream() throws IOException { return null; }
     public OutputStream getOutputStream() throws IOException { return null; }
+    public void shutdownInput() throws IOException {}
+    public void shutdownOutput() throws IOException {}
     public void close() throws IOException {}
 }
 J
