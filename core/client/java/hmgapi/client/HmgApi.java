@@ -240,6 +240,21 @@ public final class HmgApi {
 
     /** one raw hmgapid op */
     public Result call(String... args) throws IOException {
+        int[] backoffMs = { 80, 160, 320 };
+        Result r = callOnce(args);
+        for (int attempt = 0; r.code == 75 && attempt < backoffMs.length; attempt++) {
+            try {
+                Thread.sleep(backoffMs[attempt]);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            r = callOnce(args);
+        }
+        return r;
+    }
+
+    private Result callOnce(String... args) throws IOException {
         LocalSocket s = new LocalSocket();
         try {
             try {

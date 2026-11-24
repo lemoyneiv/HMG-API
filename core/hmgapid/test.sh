@@ -353,6 +353,60 @@ assert s.recv(10) == b""
 PY
 check "still answers after bad clients" "ok" "$(run root ping)"
 
+# --- MAX_WORKERS busy_reply: returns code 75 cleanly without EPIPE ("Broken pipe")
+mkdir -p "$T/busy/root/mods"
+printf '\n' > "$T/busy/packages.list"
+cp "$T/root/logcat" "$T/root/app_process" "$T/root/getprop" "$T/busy/"
+OUT="$T/busy" sh build.sh -DNOCAPCHECK -DMAX_WORKERS=2 -DROOTDIR="\"$T/busy/root\"" -DSH="\"/bin/sh\"" -DLOGCAT="\"$T/busy/logcat\"" \
+    -DREBOOT="\"/bin/true\"" -DAPP_PROCESS="\"$T/busy/app_process\"" -DPACKAGES_LIST="\"$T/busy/packages.list\"" -DGETPROP="\"$T/busy/getprop\"" \
+    -DUSBROOT="\"$T/busy/usb\"" -DBOOTMARK="\"$T/busy/bootmark\"" -DSOCK_NAME="\"hmgapid-test-busy-$$\"" \
+    -DVEHICLE_SOCK="\"hmgapi-vehicle-busy-$$\"" -DWIFI_SOCK="\"hmgapi-wifi-busy-$$\"" -DSHELL_UID="$ME" >/dev/null
+"$T/busy/hmgapid" daemon >/dev/null
+"$T/busy/hmgapid" sh "$SLEEP 3" >/dev/null 2>&1 & bw1=$!
+"$T/busy/hmgapid" sh "$SLEEP 3" >/dev/null 2>&1 & bw2=$!
+sleep 0.4
+python3 - "hmgapid-test-busy-$$" <<'PY' && echo "ok    busy_reply drains LFD1 request and returns code 75 without EPIPE" || { echo "FAIL  busy_reply EPIPE"; fail=1; }
+import socket, struct, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect("\0" + sys.argv[1])
+s.settimeout(3)
+# Send a multi-KB LFD1 request while daemon is at MAX_WORKERS: must NOT raise BrokenPipeError!
+arg = b"x" * 4096
+req = b"LFD1" + struct.pack("<I", 2) + struct.pack("<I", 4) + b"wifi" + struct.pack("<I", len(arg)) + arg
+s.sendall(req)
+buf = b""
+while True:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    buf += chunk
+s.close()
+assert b"X\x04\x00\x00\x00\x4b\x00\x00\x00" in buf, f"missing exit 75 frame in {buf!r}"
+PY
+wait $bw1 $bw2 2>/dev/null || true
+
+# --- @hmgapi-wifi stalled listen backlog: times out in ~3s and queues restart hmgapi wifi
+mkdir -p "$T/busy/root/state"
+printf '#!/bin/sh\nexit 0\n' > "$T/busy/root/state/wifi.sh"
+chmod +x "$T/busy/root/state/wifi.sh"
+python3 - "hmgapi-wifi-busy-$$" <<'PY' &
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind("\0" + sys.argv[1])
+s.listen(4)
+time.sleep(5)
+s.close()
+PY
+WP=$!
+sleep 0.3
+t0=$(date +%s)
+set +e; wout=$("$T/busy/hmgapid" wifi status 2>&1); wrc=$?; set -e
+dt=$(( $(date +%s) - t0 ))
+check "stalled @hmgapi-wifi fails fast (~3s, <6s) with code 1" "1|yes" "$wrc|$([ $dt -lt 6 ] && echo yes || echo no)"
+has "stalled @hmgapi-wifi returns restarting message" "restarting" "$wout"
+has "stalled @hmgapi-wifi queues ctl restart" "restart hmgapi wifi" "$(cat "$T/busy/root/state/ctl/"* 2>/dev/null || cat "$T/busy/root/hmgapid.log" 2>/dev/null)"
+wait $WP 2>/dev/null || true
+
 # --- boot: the boot hook's line returns at once (NEMESIS's start comes after it); detached, it
 # starts the daemon if none runs and runs boot.sh, once per boot (BOOTMARK): a second trigger
 # (NEMESIS's service) stops there. On the car the zygote wrapper has usually started the daemon

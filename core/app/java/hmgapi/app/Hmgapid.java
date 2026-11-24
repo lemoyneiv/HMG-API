@@ -42,6 +42,21 @@ final class Hmgapid {
 
     /** timeoutMs: how long to wait for output (the engine prints only when it's done). */
     static Result call(int timeoutMs, String... args) throws IOException {
+        int[] backoffMs = { 80, 160, 320 };
+        Result r = callOnce(timeoutMs, args);
+        for (int attempt = 0; r.code == 75 && attempt < backoffMs.length; attempt++) {
+            try {
+                Thread.sleep(backoffMs[attempt]);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            r = callOnce(timeoutMs, args);
+        }
+        return r;
+    }
+
+    private static Result callOnce(int timeoutMs, String... args) throws IOException {
         LocalSocket s = new LocalSocket();
         try {
             s.connect(new LocalSocketAddress("hmgapid", LocalSocketAddress.Namespace.ABSTRACT));

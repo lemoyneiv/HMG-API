@@ -21,6 +21,7 @@ public final class HomeWifiKeepAwake {
     public static final long UNPLUG_GRACE_MS = 60000L;
     public static final long PEER_FRESH_MS = 25000L;
     public static final long HOME_ACQUIRE_TIMEOUT_MS = 120000L;    // 2 min when no saved Home Wi-Fi seen
+    public static final long SILENT_WAKE_ACQUIRE_TIMEOUT_MS = 35000L; // 35s on silent pwrSt=6 background wakes
     public static final long HOME_CONNECTING_CAP_MS = 180000L;     // 3 min cap when saved SSID seen / associating
     public static final long HOME_RECONNECT_TIMEOUT_MS = 180000L;  // 3 min reconnect window after mid-park drop
 
@@ -178,7 +179,7 @@ public final class HomeWifiKeepAwake {
                             String rawUnpluggedCode,
                             String rawPluggedCode,
                             PeerLease peer) {
-        return evaluate(veh, nowElapsedMs, curBootId, rawUnpluggedCode, rawPluggedCode, peer, true, true, false);
+        return evaluate(veh, nowElapsedMs, curBootId, rawUnpluggedCode, rawPluggedCode, peer, true, true, false, false);
     }
 
     public Verdict evaluate(WifiPlatform.VehicleSnapshot veh,
@@ -190,7 +191,7 @@ public final class HomeWifiKeepAwake {
                             boolean wifiConnected,
                             boolean homeSeenOrAssociating) {
         return evaluate(veh, nowElapsedMs, curBootId, rawUnpluggedCode, rawPluggedCode, peer,
-                wifiConnected, homeSeenOrAssociating, false);
+                wifiConnected, homeSeenOrAssociating, false, false);
     }
 
     public Verdict evaluate(WifiPlatform.VehicleSnapshot veh,
@@ -202,6 +203,20 @@ public final class HomeWifiKeepAwake {
                             boolean wifiConnected,
                             boolean homeSeenOrAssociating,
                             boolean waitingForSoftApStop) {
+        return evaluate(veh, nowElapsedMs, curBootId, rawUnpluggedCode, rawPluggedCode, peer,
+                wifiConnected, homeSeenOrAssociating, waitingForSoftApStop, false);
+    }
+
+    public Verdict evaluate(WifiPlatform.VehicleSnapshot veh,
+                            long nowElapsedMs,
+                            String curBootId,
+                            String rawUnpluggedCode,
+                            String rawPluggedCode,
+                            PeerLease peer,
+                            boolean wifiConnected,
+                            boolean homeSeenOrAssociating,
+                            boolean waitingForSoftApStop,
+                            boolean silentDelayWake) {
         if (veh == null || veh.isPowerOn()) {
             reset();
             return new Verdict(false, false, false, false, false, "off", 0, 0L);
@@ -246,6 +261,8 @@ public final class HomeWifiKeepAwake {
 
         // Home detection: require connecting to an allowed Home Wi-Fi SSID within 2m (3m if seen/associating),
         // and allow up to 3m to reconnect if a previously established Home Wi-Fi link drops mid-park.
+        // On silent background Bluelink/BCM wakes into delay_mode (pwrSt=6, never IG ON this boot, unplugged),
+        // release after 35s (~8 scan passes) when no saved Home Wi-Fi is seen.
         // While SoftAP is still tearing down (AP_STATE_DISABLING), slide acquireWindowStartMs forward so
         // slow hostapd/projection socket teardown never consumes wpa_supplicant's scan window.
         if (wifiConnected) {
@@ -262,7 +279,10 @@ public final class HomeWifiKeepAwake {
             acquireWindowStartMs = nowElapsedMs;
             awayTimedOut = false;
         } else {
-            long limitMs = homeSeenOrAssociating ? HOME_CONNECTING_CAP_MS : HOME_ACQUIRE_TIMEOUT_MS;
+            long baseAcquireMs = (silentDelayWake && !effectivePlugged)
+                    ? SILENT_WAKE_ACQUIRE_TIMEOUT_MS
+                    : HOME_ACQUIRE_TIMEOUT_MS;
+            long limitMs = homeSeenOrAssociating ? HOME_CONNECTING_CAP_MS : baseAcquireMs;
             if (acquireWindowStartMs >= 0L && (nowElapsedMs - acquireWindowStartMs) >= limitMs) {
                 awayTimedOut = true;
             }

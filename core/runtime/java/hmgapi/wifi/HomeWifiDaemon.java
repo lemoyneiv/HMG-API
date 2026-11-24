@@ -29,6 +29,8 @@ import java.util.List;
 public final class HomeWifiDaemon {
     public static final String SOCKET_NAME = "hmgapi-wifi";
 
+    private static volatile boolean shuttingDown = false;
+
     private HomeWifiDaemon() {}
 
     public static void main(String[] args) throws Exception {
@@ -57,6 +59,7 @@ public final class HomeWifiDaemon {
         Runtime.getRuntime().addShutdownHook(new Thread("homewifi-shutdown") {
             @Override
             public void run() {
+                shuttingDown = true;
                 try { server.close(); } catch (Exception ignored) {}
                 controller.shutdown("SIGTERM");
                 platform.close();
@@ -66,12 +69,23 @@ public final class HomeWifiDaemon {
         Thread ipcThread = new Thread("homewifi-ipc") {
             @Override
             public void run() {
-                while (true) {
-                    final LocalSocket client;
+                int consecutiveErrors = 0;
+                while (!shuttingDown) {
+                    LocalSocket client = null;
                     try {
                         client = server.accept();
-                    } catch (IOException e) {
-                        break;
+                        consecutiveErrors = 0;
+                    } catch (Throwable t) {
+                        if (shuttingDown) break;
+                        consecutiveErrors++;
+                        android.util.Log.w("HMG-API", "wifi: @hmgapi-wifi accept error (#" + consecutiveErrors + "): " + t);
+                        if (consecutiveErrors >= 20) {
+                            android.util.Log.e("HMG-API", "wifi: @hmgapi-wifi unrecoverable accept failure; exiting for hmgapid restart");
+                            System.exit(1);
+                            return;
+                        }
+                        try { Thread.sleep(100L); } catch (InterruptedException ignored) {}
+                        continue;
                     }
                     handleClient(client, controller);
                 }
@@ -88,6 +102,24 @@ public final class HomeWifiDaemon {
         });
 
         Looper.loop();
+    }
+
+    /**
+     * Closes an accepted socket's underlying OS fd. On Gen5W Android 4.4 (KitKat, AOSP Bug 36917),
+     * LocalServerSocket.accept() leaves fdCreatedInternally == false, so LocalSocket.close() drops
+     * the Java wrapper without closing the kernel fd — leaking 1 fd per @hmgapi-wifi request until
+     * EMFILE wedges server.accept(). Matches Hub.close() and BleHooks.closeAccepted().
+     */
+    static void closeAccepted(LocalSocket s) {
+        if (s == null) return;
+        java.io.FileDescriptor fd = null;
+        try { fd = s.getFileDescriptor(); } catch (Throwable ignored) {}
+        try { s.shutdownOutput(); } catch (Throwable ignored) {}
+        try { s.shutdownInput(); } catch (Throwable ignored) {}
+        try {
+            if (fd != null && fd.valid()) libcore.io.Libcore.os.close(fd);
+        } catch (Throwable ignored) {}
+        try { s.close(); } catch (Exception ignored) {}
     }
 
     private static void handleClient(LocalSocket client, HomeWifiController controller) {
@@ -126,7 +158,7 @@ public final class HomeWifiDaemon {
             writeResponse(client.getOutputStream(), res.code, res.output);
         } catch (Exception ignored) {
         } finally {
-            try { client.close(); } catch (Exception ignored) {}
+            closeAccepted(client);
         }
     }
 

@@ -53,6 +53,7 @@ public final class HomeWifiControllerTest {
         testAdbOverWifiLifecycleAndScrubbing();
         testLockedCabinIccuPlugLatchAndNoZombieReentry();
         testSlowSoftApDisablingAndRapManualScanHandoff();
+        testSilentDelayModeBackgroundWakeFastRelease();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -1171,6 +1172,43 @@ public final class HomeWifiControllerTest {
                     plat.softApActive && plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED);
             check("Phase returns to standby on IG_ON after RAP scan",
                     "standby", Json.object(ctl.statusJson()).get("phase"));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testSilentDelayModeBackgroundWakeFastRelease() throws Exception {
+        File root = Files.createTempDirectory("hw-silent-wake").toFile();
+        try {
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("MyHome", "homepassword", true, "[WPA2-PSK-CCMP][ESS]", true);
+
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            // Simulate silent Bluelink/BCM cold boot directly into delay_mode (pwrSt=6, never power=on)
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, false, false, false, 82, false, 1, 1);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+
+            // After 5s (SILENT_WAKE_OFF_DELAY_MS), client Wi-Fi starts scanning immediately without waiting 30s
+            plat.nowMs += 5500L;
+            ctl.tickVehicleAndHealth();
+            ctl.onApStateChanged(WifiPlatform.AP_STATE_DISABLED);
+            checkTrue("Silent delay_mode wake starts scanning after 5s",
+                    plat.wifiState == WifiPlatform.WIFI_STATE_ENABLED);
+
+            // At +20s away from home: still scanning
+            plat.nowMs += 20000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Silent delay_mode wake still scanning at +20s",
+                    plat.wifiState == WifiPlatform.WIFI_STATE_ENABLED);
+
+            // At +36s (>= SILENT_WAKE_ACQUIRE_TIMEOUT_MS=35s) with 0 saved SSIDs seen: releases Wi-Fi & power lock!
+            plat.nowMs += 16000L;
+            ctl.tickVehicleAndHealth();
+            checkTrue("Silent delay_mode wake away from home shuts down Wi-Fi & power lock after 35s",
+                    plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED && !plat.holdParkedPower);
+            check("Silent delay_mode wake enters sleep phase",
+                    "sleep", Json.object(ctl.statusJson()).get("phase"));
         } finally {
             deleteRec(root);
         }

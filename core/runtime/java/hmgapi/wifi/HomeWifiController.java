@@ -37,6 +37,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     public static final long VEHICLE_POLL_ACTIVE_MS = 1500L;
     public static final long VEHICLE_POLL_IDLE_MS = 4000L;
     public static final long OFF_DELAY_MS = 30000L;
+    public static final long SILENT_WAKE_OFF_DELAY_MS = 5000L;
 
     static final String TAG_VEHICLE = "vehicle_tick";
     static final String TAG_AP_FALLBACK = "ap_disable_fallback";
@@ -64,6 +65,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private long lastSleepGapMs = Long.MIN_VALUE;
     private long powerOffSinceMs = -1L;
     private boolean doorOpenedWhileOff = false;
+    private boolean sawPowerOnThisBoot = false;
     private boolean manualActive = false;
     private boolean manualStartedWhilePowerOn = false;
     private long manualDeadlineMs = 0L; // 0 = unlimited while in P
@@ -269,6 +271,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             String strDetail = "gapDeltaMs=" + deltaMs + " totalGapMs=" + sleepGap
                     + " power=" + veh.power + " sessionWasActive=" + sessionActive;
             recordFlight("STR_RESUME", strDetail, strDetail, true);
+            sawPowerOnThisBoot = veh.isPowerOn();
             if (veh.isPowerOn()) {
                 powerOffSinceMs = -1L;
                 if (!sessionActive && !pendingApRestoreOnPowerOn
@@ -310,6 +313,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
 
         if (veh.isPowerOn()) {
+            sawPowerOnThisBoot = true;
             keepAwake.reset();
             lastKeepAwakeVerdict = new HomeWifiKeepAwake.Verdict(false, false, false, false, false, "off", 0, 0L);
             store.clearKeepAwakeLease();
@@ -377,6 +381,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             boolean wifiConnected = sessionActive && "connected".equals(phase);
             boolean homeSeenOrAssoc = isHomeNetworkSeenOrAssociating();
             boolean waitingForApStop = sessionActive && "disabling_ap".equals(phase);
+            boolean silentDelayWake = !sawPowerOnThisBoot && "delay_mode".equalsIgnoreCase(veh.power);
             peerLease = store.readPeerOpenLinkLease();
             lastKeepAwakeVerdict = keepAwake.evaluate(
                     veh,
@@ -387,7 +392,8 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     peerLease,
                     wifiConnected,
                     homeSeenOrAssoc,
-                    waitingForApStop);
+                    waitingForApStop,
+                    silentDelayWake);
             if (manualActive && !manualStartedWhilePowerOn && !lastKeepAwakeVerdict.shouldStayInClientMode) {
                 // RAP UI scan handed off to parked sleep (e.g. away from home after 2m)
                 manualActive = false;
@@ -572,7 +578,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
             powerOffSinceMs = nowElapsed;
             return false;
         }
-        return (nowElapsed - powerOffSinceMs) >= OFF_DELAY_MS;
+        long waitMs = (!sawPowerOnThisBoot && "delay_mode".equalsIgnoreCase(veh.power))
+                ? SILENT_WAKE_OFF_DELAY_MS
+                : OFF_DELAY_MS;
+        return (nowElapsed - powerOffSinceMs) >= waitMs;
     }
 
     private void enterClientSession(String reason) {

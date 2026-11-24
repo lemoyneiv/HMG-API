@@ -100,7 +100,9 @@ typedef long sl;
 #define MAX_ARGS 16
 #define MAX_ARG (64 * 1024)
 #define MAX_REQ (128 * 1024)
-#define MAX_WORKERS 8
+#ifndef MAX_WORKERS
+#define MAX_WORKERS 24
+#endif
 #define REQ_TIMEOUT 30
 
 /* ---------------- syscalls ---------------- */
@@ -160,6 +162,7 @@ static long clock_sec(int clk)
 #define x_connect(fd, a, l) S3(283, fd, a, l)
 #define x_listen(fd, n) S2(284, fd, n)
 #define x_accept(fd) S3(285, fd, 0, 0)
+#define x_shutdown(fd, how) S2(293, fd, how)
 #define x_setsockopt(fd, l, o, v, n) S5(294, fd, l, o, v, n)
 #define x_getsockopt(fd, l, o, v, n) S5(295, fd, l, o, v, n)
 #define x_umount2(t, f) S2(52, t, f)
@@ -1733,13 +1736,25 @@ static u32 get_u32(const u8 *p)
     return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
 }
 
+static void queue_wifi_restart(void)
+{
+    char p[128];
+    line_t l;
+    x_mkdir(ROOTDIR "/state/ctl", 0700);
+    l.n = 0; l.b[0] = 0;
+    lput(&l, ROOTDIR "/state/ctl/wifi-heal-"); lnum(&l, x_getpid());
+    mcpy(p, l.b, l.n + 1);
+    write_small(p, "restart hmgapi wifi");
+    logline("wifi: @hmgapi-wifi stalled; queued restart", 0, -1, 0);
+}
+
 /* Direct IPC to @hmgapi-wifi when HomeWifiDaemon is up (<1 ms, zero shell/JVM fork); -1 if offline. */
 static int op_wifi_sock(int fd, int argc, char **argv)
 {
     static char wbuf[4096];
     struct sun wa;
     int walen = sockaddr_of(&wa, WIFI_SOCK), i;
-    struct { sl sec, usec; } tv = { 10, 0 };
+    struct { sl sec, usec; } tv = { 3, 0 };
     u8 hdr[8], lenb[4];
     u32 code, rem;
     sl s = x_socket(1, 1 | 02000000, 0);
@@ -1748,13 +1763,13 @@ static int op_wifi_sock(int fd, int argc, char **argv)
     if (x_connect(s, &wa, walen) < 0) { x_close(s); return -1; }
     hdr[0] = 'L'; hdr[1] = 'F'; hdr[2] = 'D'; hdr[3] = '1';
     put_u32(hdr + 4, (u32)(argc - 1));
-    if (wall((int)s, hdr, 8)) { x_close(s); return 1; }
+    if (wall((int)s, hdr, 8)) { x_close(s); queue_wifi_restart(); say(fd, "Home Wi-Fi service is restarting; try again in a moment.\n"); return 1; }
     for (i = 1; i < argc; i++) {
         u32 l = (u32)slen(argv[i]);
         put_u32(lenb, l);
-        if (wall((int)s, lenb, 4) || (l && wall((int)s, argv[i], l))) { x_close(s); return 1; }
+        if (wall((int)s, lenb, 4) || (l && wall((int)s, argv[i], l))) { x_close(s); queue_wifi_restart(); say(fd, "Home Wi-Fi service is restarting; try again in a moment.\n"); return 1; }
     }
-    if (rall((int)s, hdr, 8)) { x_close(s); return 1; }
+    if (rall((int)s, hdr, 8)) { x_close(s); queue_wifi_restart(); say(fd, "Home Wi-Fi service is restarting; try again in a moment.\n"); return 1; }
     code = get_u32(hdr);
     rem = get_u32(hdr + 4);
     if (rem > 256 * 1024) { x_close(s); return 1; }
@@ -2021,6 +2036,24 @@ static int full_root(void)
 
 struct ksigaction { void *handler; ul flags; void *restorer; u32 mask[2]; };
 
+static void busy_reply(int fd)
+{
+    char drop[1024];
+    struct { int fd; short ev, rev; } p = { fd, POLLIN, 0 };
+    int i;
+    say(fd, "hmgapid is busy, try again\n");
+    done(fd, 75);
+    x_shutdown(fd, 1 /* SHUT_WR */);
+    /* Drain the client's in-flight LFD1 request before closing fd so the client reads
+     * exit code 75 cleanly instead of getting EPIPE ("Broken pipe") on write(). */
+    for (i = 0; i < 8; i++) {
+        p.rev = 0;
+        if (x_poll(&p, 1, 20) <= 0) break;
+        if (x_read(fd, drop, sizeof drop) <= 0) break;
+    }
+    x_close(fd);
+}
+
 static int daemon_main(void)
 {
     struct sun a;
@@ -2048,7 +2081,7 @@ static int daemon_main(void)
     if (s < 0) return 1;
     r = x_bind(s, &a, alen);
     if (r == -EADDRINUSE) { out(1, "hmgapid: already running\n"); return 0; }
-    if (r < 0 || x_listen(s, 16) < 0) { out(2, "hmgapid: can't listen\n"); return 1; }
+    if (r < 0 || x_listen(s, 32) < 0) { out(2, "hmgapid: can't listen\n"); return 1; }
 
     /* detach: the boot hook's process may be killed when it returns */
     if (x_pipe(ready) < 0) return 1;
@@ -2093,7 +2126,7 @@ static int daemon_main(void)
         if (x_poll(&p, 1, 1000) <= 0) continue;
         c = x_accept(s);
         if (c < 0) continue;
-        if (workers >= MAX_WORKERS) { done((int)c, 75); x_close(c); continue; }   /* busy */
+        if (workers >= MAX_WORKERS) { busy_reply((int)c); continue; }   /* busy */
         r = x_fork();
         if (r == 0) {
             x_close(s);
