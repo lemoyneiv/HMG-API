@@ -206,13 +206,18 @@ final class BleHooks {
      * so {@code LocalSocket.close()} alone leaks the fd without sending EOF (#164).
      */
     private static Closeable singleClose(final LocalSocket s) {
+        java.io.FileDescriptor captured = null;
+        try { captured = s.getFileDescriptor(); } catch (Throwable ignored) {}
+        final java.io.FileDescriptor acceptedFd = captured;
         final AtomicBoolean done = new AtomicBoolean(false);
         return new Closeable() {
             @Override
             public void close() {
                 if (!done.compareAndSet(false, true)) return;
-                java.io.FileDescriptor fd = null;
-                try { fd = s.getFileDescriptor(); } catch (Throwable ignored) {}
+                java.io.FileDescriptor fd = acceptedFd;
+                if (fd == null) {
+                    try { fd = s.getFileDescriptor(); } catch (Throwable ignored) {}
+                }
                 try { s.shutdownOutput(); } catch (Throwable ignored) {}
                 try { s.shutdownInput(); } catch (Throwable ignored) {}
                 try {
@@ -229,6 +234,17 @@ final class BleHooks {
         };
     }
 
+    private static boolean isBluetoothAdapterOff() {
+        try {
+            android.bluetooth.BluetoothAdapter adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null) return false;
+            int st = adapter.getState();
+            return st == BT_STATE_OFF || st == BT_STATE_TURNING_OFF;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static final class NativeTransport implements BleTransport {
         private volatile boolean ready;
         private volatile boolean listening;
@@ -237,6 +253,10 @@ final class BleHooks {
 
         @Override
         public synchronized boolean ensureReady(final Receiver receiver) throws IOException {
+            if (isBluetoothAdapterOff()) {
+                if (ready) shutdown();
+                return false;
+            }
             if (isReady() && txOut != null) return true;
             if (ready) {
                 if (listening) {
@@ -247,6 +267,7 @@ final class BleHooks {
             }
             int lastRc = 0;
             for (int attempt = 0; attempt < 6; attempt++) {
+                if (isBluetoothAdapterOff()) return false;
                 ParcelFileDescriptor[] tx = ParcelFileDescriptor.createPipe();
                 ParcelFileDescriptor[] rx = ParcelFileDescriptor.createPipe();
                 int rc = Bridge.bleInitNative(tx[0].getFd(), rx[1].getFd());

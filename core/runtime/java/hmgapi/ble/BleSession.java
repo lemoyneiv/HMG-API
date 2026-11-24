@@ -224,6 +224,5 @@ final class BleSession {
         if (closeable != null) {
             try { closeable.close(); } catch (Throwable ignored) {}
         }
-        try { writer.close(); } catch (Throwable ignored) {}
     }
 }

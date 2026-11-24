@@ -1199,6 +1199,16 @@ public final class AndroidWifiPlatform implements WifiPlatform {
         if (getSoftApState() == AP_STATE_ENABLED && getSoftApMode() == mode) {
             return true;
         }
+        if (getSoftApState() == AP_STATE_DISABLING) {
+            try {
+                for (int t = 0; t < 24; t++) {
+                    if (getSoftApState() != AP_STATE_DISABLING) break;
+                    Thread.sleep(150);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
 
         boolean ok = false;
         if (mode == 2) {

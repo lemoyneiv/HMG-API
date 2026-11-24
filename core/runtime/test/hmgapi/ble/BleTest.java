@@ -56,6 +56,7 @@ public final class BleTest {
         testRealtekVeepeakGattSmpL2capAndPaddedAdv();
         testDiscoveryFailureCleansUpZombieLink();
         testPriorLeHostSupportRestoredOnIdle();
+        testKitKatSocketOutputStreamNeverClosedByBleSession();
         System.exit(fail);
     }
 
@@ -865,6 +866,56 @@ public final class BleTest {
                     "1,1", ctl.leSupportedHost + "," + ctl.simultaneousLeHost);
             sp.closeAll();
         }
+    }
+
+    private static void testKitKatSocketOutputStreamNeverClosedByBleSession() throws Exception {
+        // Regression test for Gen5W Android 4.4 (KitKat): LocalSocketImpl.SocketOutputStream.close()
+        // calls LocalSocketImpl.close(), which leaves unowned LocalServerSocket.accept() fds open
+        // while nulling LocalSocketImpl.fd (causing BOTH 100% EMFILE fd leaks and cross-thread
+        // jniGetFDFromFileDescriptor(NULL) SIGSEGVs). BleSession must rely solely on wakeOnlyClose
+        // + singleClose without closing its OutputStream.
+        final AtomicBoolean rawOutClosed = new AtomicBoolean(false);
+        final AtomicBoolean wakeClosed = new AtomicBoolean(false);
+        final QueuePipe c2s = new QueuePipe(4096);
+        final QueuePipe s2c = new QueuePipe(4096);
+        java.io.OutputStream guardedServerOut = new java.io.FilterOutputStream(s2c.out) {
+            @Override
+            public void close() throws IOException {
+                rawOutClosed.set(true);
+            }
+        };
+        Closeable wakeOnly = new Closeable() {
+            @Override
+            public void close() throws IOException {
+                wakeClosed.set(true);
+                s2c.out.close();
+                c2s.in.close();
+            }
+        };
+
+        final BleTransport unavailableTransport = new BleTransport() {
+            @Override public boolean ensureReady(Receiver r) { return false; }
+            @Override public boolean isReady() { return false; }
+            @Override public void shutdown() {}
+            @Override public void sendCommand(int opcode, byte[] params) {}
+            @Override public void sendAcl(int connHandle, int pbFlag, byte[] l2capPayload) {}
+            @Override public void setListening(boolean listening) {}
+            @Override public void trackHandle(int connHandle) {}
+            @Override public void untrackHandle(int connHandle) {}
+            @Override public void clearHandles() {}
+            @Override public int stat(int which) { return 0; }
+            @Override public void log(int priority, String message) {}
+        };
+        final BleCentral central = new BleCentral(unavailableTransport);
+        c2s.out.write("STREAM_SESSION 1\n".getBytes("UTF-8"));
+        central.serve(c2s.in, guardedServerOut, wakeOnly, "brake-indicator-gen5w");
+
+        BufferedReader clientReader = new BufferedReader(new InputStreamReader(s2c.in, "UTF-8"));
+        check("kitkat-fd: ERR NATIVE_BRIDGE_UNAVAILABLE flushed before wake close",
+                "ERR NATIVE_BRIDGE_UNAVAILABLE", clientReader.readLine());
+        check("kitkat-fd: wakeOnly Closeable invoked", Boolean.TRUE, Boolean.valueOf(wakeClosed.get()));
+        check("kitkat-fd: underlying OutputStream.close() NEVER called by BleSession",
+                Boolean.FALSE, Boolean.valueOf(rawOutClosed.get()));
     }
 
     private static void waitUntilScanState(FakeController ctl, boolean want) throws InterruptedException {

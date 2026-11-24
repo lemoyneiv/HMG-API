@@ -66,6 +66,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private long powerOffSinceMs = -1L;
     private boolean doorOpenedWhileOff = false;
     private boolean sawPowerOnThisBoot = false;
+    private Boolean lastPowerOn = null;
     private boolean manualActive = false;
     private boolean manualStartedWhilePowerOn = false;
     private long manualDeadlineMs = 0L; // 0 = unlimited while in P
@@ -272,6 +273,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     + " power=" + veh.power + " sessionWasActive=" + sessionActive;
             recordFlight("STR_RESUME", strDetail, strDetail, true);
             sawPowerOnThisBoot = veh.isPowerOn();
+            lastPowerOn = Boolean.valueOf(veh.isPowerOn());
             if (veh.isPowerOn()) {
                 powerOffSinceMs = -1L;
                 if (!sessionActive && !pendingApRestoreOnPowerOn
@@ -312,6 +314,9 @@ public final class HomeWifiController implements WifiPlatform.Events {
             recordFlight("VEHICLE_IG_ON", vMsg, vMsg, true);
         }
 
+        boolean powerTransitionedOn = Boolean.FALSE.equals(lastPowerOn) && veh.isPowerOn();
+        lastPowerOn = Boolean.valueOf(veh.isPowerOn());
+
         if (veh.isPowerOn()) {
             sawPowerOnThisBoot = true;
             keepAwake.reset();
@@ -326,6 +331,15 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 store.clearActiveBootId();
                 platform.log("Restored SoftAP mode " + savedApMode + " on power-on after parked sleep");
                 recordFlight("SOFTAP_RESTORED", "mode=" + savedApMode, "mode=" + savedApMode, true);
+            } else if (powerTransitionedOn
+                    && !sessionActive
+                    && !manualActive
+                    && store.isProjectionApRequested()
+                    && !platform.isSoftApActiveOrEnabling()
+                    && platform.getWifiState() == WifiPlatform.WIFI_STATE_DISABLED) {
+                platform.restoreSoftAp(2);
+                platform.log("Restored projection SoftAP mode 2 on power-on");
+                recordFlight("SOFTAP_RESTORED", "mode=2 reason=power_on", "mode=2 reason=power_on", true);
             }
         }
 

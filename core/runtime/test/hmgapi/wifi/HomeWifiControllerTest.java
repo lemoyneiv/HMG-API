@@ -54,6 +54,7 @@ public final class HomeWifiControllerTest {
         testLockedCabinIccuPlugLatchAndNoZombieReentry();
         testSlowSoftApDisablingAndRapManualScanHandoff();
         testSilentDelayModeBackgroundWakeFastRelease();
+        testDoorWakeSquashedProjectionSoftApRestoredOnIgOn();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -1209,6 +1210,41 @@ public final class HomeWifiControllerTest {
                     plat.wifiState == WifiPlatform.WIFI_STATE_DISABLED && !plat.holdParkedPower);
             check("Silent delay_mode wake enters sleep phase",
                     "sleep", Json.object(ctl.statusJson()).get("phase"));
+        } finally {
+            deleteRec(root);
+        }
+    }
+
+    private static void testDoorWakeSquashedProjectionSoftApRestoredOnIgOn() throws Exception {
+        File root = Files.createTempDirectory("hw-doorwake-ap").toFile();
+        try {
+            File stateDir = new File(root, "data/hmgapi/state");
+            stateDir.mkdirs();
+            Files.write(new File(stateDir, "wifi.txt").toPath(),
+                    "projection wireless-carplay-aa\nhome hmgapi\n".getBytes("UTF-8"));
+            HomeWifiStore store = new HomeWifiStore(root);
+            FakeWifiPlatform plat = new FakeWifiPlatform();
+            // Cold boot away from home in delay_mode (driver opened door at +17s); stock Mode 2 SoftAP is up initially
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, false, false, false, 82, false, 0, 0);
+            HomeWifiController ctl = new HomeWifiController(store, plat);
+            ctl.start();
+            check("Session stays inactive during initial delay_mode window",
+                    "standby", Json.object(ctl.statusJson()).get("phase"));
+
+            // At +18.6s OpenLink's Dark Guard squashes SoftAP before HomeWifiController enters client mode,
+            // leaving SoftAP in AP_STATE_DISABLING (10) / AP_STATE_DISABLED (11)
+            plat.softApActive = false;
+            plat.softApStateOverride = WifiPlatform.AP_STATE_DISABLING;
+            plat.lastRestoredApMode = -1;
+
+            // At +19.9s driver presses START (delay_mode -> on)
+            plat.nowMs += 2500L;
+            plat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 82, false, 1, 0);
+            ctl.tickVehicleAndHealth();
+
+            check("Mode 2 projection SoftAP restored on delay_mode -> on transition",
+                    Integer.valueOf(2), Integer.valueOf(plat.lastRestoredApMode));
+            checkTrue("SoftAP active again for Wireless CarPlay / Android Auto", plat.softApActive);
         } finally {
             deleteRec(root);
         }
