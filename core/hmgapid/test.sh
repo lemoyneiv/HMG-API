@@ -404,7 +404,7 @@ set +e; wout=$("$T/busy/hmgapid" wifi status 2>&1); wrc=$?; set -e
 dt=$(( $(date +%s) - t0 ))
 check "stalled @hmgapi-wifi fails fast (~3s, <6s) with code 1" "1|yes" "$wrc|$([ $dt -lt 6 ] && echo yes || echo no)"
 has "stalled @hmgapi-wifi returns restarting message" "restarting" "$wout"
-has "stalled @hmgapi-wifi queues ctl restart" "restart hmgapi wifi" "$(cat "$T/busy/root/state/ctl/"* 2>/dev/null || cat "$T/busy/root/hmgapid.log" 2>/dev/null)"
+has "stalled @hmgapi-wifi queues ctl restart" "wifi: @hmgapi-wifi stalled; queued restart" "$(cat "$T/busy/root/hmgapid.log" 2>/dev/null)"
 wait $WP 2>/dev/null || true
 
 # --- boot: the boot hook's line returns at once (NEMESIS's start comes after it); detached, it

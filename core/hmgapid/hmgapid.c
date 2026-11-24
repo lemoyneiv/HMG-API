@@ -2054,6 +2054,16 @@ static void busy_reply(int fd)
     x_close(fd);
 }
 
+static void reap_children(int *workers)
+{
+    for (;;) {   /* children: services and op workers */
+        int st = 0;
+        sl k = x_wait4(-1, &st, WNOHANG);
+        if (k <= 0) break;
+        if (!svc_exited(k, st, x_time()) && *workers > 0) (*workers)--;
+    }
+}
+
 static int daemon_main(void)
 {
     struct sun a;
@@ -2116,17 +2126,15 @@ static int daemon_main(void)
     for (;;) {
         struct { int fd; short ev, rev; } p = { (int)s, POLLIN, 0 };
         sl c;
-        for (;;) {   /* children: services and op workers */
-            int st = 0;
-            sl k = x_wait4(-1, &st, WNOHANG);
-            if (k <= 0) break;
-            if (!svc_exited(k, st, x_time()) && workers > 0) workers--;
-        }
+        reap_children(&workers);
         svc_tick();
         if (x_poll(&p, 1, 1000) <= 0) continue;
         c = x_accept(s);
         if (c < 0) continue;
-        if (workers >= MAX_WORKERS) { busy_reply((int)c); continue; }   /* busy */
+        if (workers >= MAX_WORKERS) {
+            reap_children(&workers);
+            if (workers >= MAX_WORKERS) { busy_reply((int)c); continue; }   /* busy */
+        }
         r = x_fork();
         if (r == 0) {
             x_close(s);
