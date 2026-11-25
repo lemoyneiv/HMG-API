@@ -173,6 +173,9 @@ public interface WifiPlatform {
     void routeDown();
     boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown);
 
+    boolean fastStartProjectionStack(String reason);
+    void clearProjectionFastStart();
+
     void scheduleDelayed(String tag, long delayMs, Runnable task);
     void cancelScheduled(String tag);
     void log(String line);

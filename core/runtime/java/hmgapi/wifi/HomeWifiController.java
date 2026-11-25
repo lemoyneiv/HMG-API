@@ -38,6 +38,10 @@ public final class HomeWifiController implements WifiPlatform.Events {
     public static final long VEHICLE_POLL_IDLE_MS = 4000L;
     public static final long OFF_DELAY_MS = 30000L;
     public static final long SILENT_WAKE_OFF_DELAY_MS = 5000L;
+    public static final long ENTRY_GRACE_MS = 45000L;
+    public static final long SOFTAP_SELF_HEAL_COOLDOWN_MS = 15000L;
+    public static final long PROJ_FASTSTART_POLL_MS = 400L;
+    public static final int PROJ_FASTSTART_MAX_POLLS = 45;
 
     static final String TAG_VEHICLE = "vehicle_tick";
     static final String TAG_AP_FALLBACK = "ap_disable_fallback";
@@ -47,6 +51,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     static final String TAG_ASSOC_WATCHDOG = "assoc_watchdog";
     static final String TAG_ASSOC_SETTLE = "assoc_settle";
     static final String TAG_DHCP_POLL = "dhcp_poll";
+    static final String TAG_PROJ_FASTSTART = "proj_faststart";
 
     public static final class CmdResult {
         public final int code;
@@ -67,6 +72,11 @@ public final class HomeWifiController implements WifiPlatform.Events {
     private boolean doorOpenedWhileOff = false;
     private boolean sawPowerOnThisBoot = false;
     private Boolean lastPowerOn = null;
+    private long driverEntryGraceStartMs = -1L;
+    private boolean driverEntryGraceExited = false;
+    private boolean projectionFastStartedThisBoot = false;
+    private int projFastStartPolls = 0;
+    private long lastSoftApSelfHealMs = -100000L;
     private boolean manualActive = false;
     private boolean manualStartedWhilePowerOn = false;
     private long manualDeadlineMs = 0L; // 0 = unlimited while in P
@@ -187,6 +197,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
     public synchronized void shutdown(String reason) {
         cancelAllTimers();
         platform.cancelScheduled(TAG_VEHICLE);
+        platform.clearProjectionFastStart();
         if (sessionActive) {
             exitClientSession(reason, true);
         } else {
@@ -274,6 +285,11 @@ public final class HomeWifiController implements WifiPlatform.Events {
             recordFlight("STR_RESUME", strDetail, strDetail, true);
             sawPowerOnThisBoot = veh.isPowerOn();
             lastPowerOn = Boolean.valueOf(veh.isPowerOn());
+            driverEntryGraceStartMs = -1L;
+            driverEntryGraceExited = false;
+            projectionFastStartedThisBoot = false;
+            projFastStartPolls = 0;
+            lastSoftApSelfHealMs = -100000L;
             if (veh.isPowerOn()) {
                 powerOffSinceMs = -1L;
                 if (!sessionActive && !pendingApRestoreOnPowerOn
@@ -281,6 +297,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                         && !platform.isSoftApActiveOrEnabling()
                         && platform.getWifiState() == WifiPlatform.WIFI_STATE_DISABLED) {
                     platform.restoreSoftAp(2);
+                    lastSoftApSelfHealMs = nowElapsed;
                     recordFlight("STR_PROJECTION_AP", "mode=2", "mode=2", false);
                 }
             }
@@ -316,6 +333,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
 
         boolean powerTransitionedOn = Boolean.FALSE.equals(lastPowerOn) && veh.isPowerOn();
         lastPowerOn = Boolean.valueOf(veh.isPowerOn());
+        boolean inDriverEntryGrace = updateDriverEntryGrace(veh, nowElapsed);
 
         if (veh.isPowerOn()) {
             sawPowerOnThisBoot = true;
@@ -328,6 +346,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             if (pendingApRestoreOnPowerOn && !sessionActive && !manualActive) {
                 pendingApRestoreOnPowerOn = false;
                 platform.restoreSoftAp(savedApMode);
+                lastSoftApSelfHealMs = nowElapsed;
                 store.clearActiveBootId();
                 platform.log("Restored SoftAP mode " + savedApMode + " on power-on after parked sleep");
                 recordFlight("SOFTAP_RESTORED", "mode=" + savedApMode, "mode=" + savedApMode, true);
@@ -338,9 +357,25 @@ public final class HomeWifiController implements WifiPlatform.Events {
                     && !platform.isSoftApActiveOrEnabling()
                     && platform.getWifiState() == WifiPlatform.WIFI_STATE_DISABLED) {
                 platform.restoreSoftAp(2);
+                lastSoftApSelfHealMs = nowElapsed;
                 platform.log("Restored projection SoftAP mode 2 on power-on");
                 recordFlight("SOFTAP_RESTORED", "mode=2 reason=power_on", "mode=2 reason=power_on", true);
             }
+        }
+
+        if ((veh.isPowerOn() || inDriverEntryGrace)
+                && !sessionActive
+                && !manualActive
+                && !pendingApRestoreOnPowerOn
+                && store.isProjectionApRequested()
+                && platform.getSoftApState() == WifiPlatform.AP_STATE_DISABLED
+                && platform.getWifiState() == WifiPlatform.WIFI_STATE_DISABLED
+                && (nowElapsed - lastSoftApSelfHealMs) >= SOFTAP_SELF_HEAL_COOLDOWN_MS) {
+            lastSoftApSelfHealMs = nowElapsed;
+            platform.restoreSoftAp(2);
+            String healReason = veh.isPowerOn() ? "boot_or_on_self_heal" : "driver_entry_grace_self_heal";
+            platform.log("Self-healed projection SoftAP mode 2 (" + healReason + ")");
+            recordFlight("SOFTAP_RESTORED", "mode=2 reason=" + healReason, "mode=2 reason=" + healReason, true);
         }
 
         // Import any newly created system profiles (e.g. fitcamx dashcam SSIDs) if Wi-Fi is enabled
@@ -357,6 +392,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
                 pinnedSsid = null;
                 if (sessionActive) {
                     exitClientSession("Car switched on", true);
+                    maybeFastStartProjection(veh, inDriverEntryGrace);
                     scheduleVehicleTick();
                     return;
                 }
@@ -385,7 +421,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             }
         }
 
-        boolean offLong = evaluateOffLong(veh, nowElapsed);
+        boolean offLong = evaluateOffLong(veh, nowElapsed, inDriverEntryGrace);
         boolean hasHomeProfile = store.hasUsableHomeProfile();
         HomeWifiKeepAwake.PeerLease peerLease = null;
 
@@ -445,6 +481,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
             if (veh.isPowerOn() && !manualActive) {
                 pinnedSsid = null;
                 exitClientSession("Car switched on", true);
+                maybeFastStartProjection(veh, false);
                 scheduleVehicleTick();
                 return;
             }
@@ -542,10 +579,13 @@ public final class HomeWifiController implements WifiPlatform.Events {
             return;
         }
 
-        boolean admPreLatch = !veh.isPowerOn() && shouldPreLatchAdmPower(veh, curBoot, nowElapsed, hasHomeProfile);
+        boolean admPreLatch = !veh.isPowerOn() && !inDriverEntryGrace
+                && shouldPreLatchAdmPower(veh, curBoot, nowElapsed, hasHomeProfile);
         platform.setSessionLocks(false, admPreLatch);
+        maybeFastStartProjection(veh, inDriverEntryGrace);
         phase = "standby";
-        headline = veh.isPowerOn() ? "Standby (Car is on)" : "Standby (Accessory / RAP)";
+        headline = veh.isPowerOn() ? "Standby (Car is on)"
+                : (inDriverEntryGrace ? "Standby (Driver Entry)" : "Standby (Accessory / RAP)");
         if (hasHomeProfile) {
             detail = "Wireless CarPlay / Android Auto is active. Home Wi-Fi connects automatically when parked, or tap \"Scan & Connect Now\" in Park.";
         } else {
@@ -553,6 +593,97 @@ public final class HomeWifiController implements WifiPlatform.Events {
         }
         store.writePublicStatus("waiting", 0, 0);
         scheduleVehicleTick();
+    }
+
+    private boolean updateDriverEntryGrace(WifiPlatform.VehicleSnapshot veh, long nowElapsed) {
+        if (veh == null || veh.isPowerOn() || sawPowerOnThisBoot) {
+            driverEntryGraceStartMs = -1L;
+            return false;
+        }
+        if (driverEntryGraceExited
+                || sessionActive
+                || manualActive
+                || pendingApRestoreOnPowerOn
+                || "sleep".equals(phase)
+                || keepAwake.isTimerExpiredThisPark()
+                || keepAwake.isAwayTimedOut()
+                || veh.saver12v) {
+            return false;
+        }
+        if (!"delay_mode".equalsIgnoreCase(veh.power)) {
+            driverEntryGraceStartMs = -1L;
+            return false;
+        }
+        if (driverEntryGraceStartMs < 0L) {
+            if (veh.doorsLocked == 0 || veh.doorsClosed == 0) {
+                driverEntryGraceStartMs = nowElapsed;
+                String gMsg = "doorsClosed=" + veh.doorsClosed + " doorsLocked=" + veh.doorsLocked;
+                recordFlight("ENTRY_GRACE_START", gMsg, gMsg, false);
+                platform.log("Entered 45s cold-boot Driver Entry Grace (" + gMsg + ")");
+            } else {
+                return false;
+            }
+        }
+        if (veh.doorsClosed == 1 && veh.doorsLocked == 1) {
+            driverEntryGraceExited = true;
+            driverEntryGraceStartMs = -1L;
+            platform.clearProjectionFastStart();
+            powerOffSinceMs = nowElapsed - SILENT_WAKE_OFF_DELAY_MS;
+            recordFlight("ENTRY_GRACE_RELOCK", "doorsClosed=1 doorsLocked=1", "doorsClosed=1 doorsLocked=1", false);
+            platform.log("Exited Driver Entry Grace immediately on door close + lock");
+            return false;
+        }
+        if ((nowElapsed - driverEntryGraceStartMs) >= ENTRY_GRACE_MS) {
+            driverEntryGraceExited = true;
+            driverEntryGraceStartMs = -1L;
+            platform.clearProjectionFastStart();
+            powerOffSinceMs = nowElapsed - SILENT_WAKE_OFF_DELAY_MS;
+            recordFlight("ENTRY_GRACE_TIMEOUT", "elapsedMs=" + ENTRY_GRACE_MS, "elapsedMs=" + ENTRY_GRACE_MS, false);
+            platform.log("45s Driver Entry Grace elapsed without IG ON; handing off to parked policy");
+            return false;
+        }
+        return true;
+    }
+
+    private void maybeFastStartProjection(WifiPlatform.VehicleSnapshot veh, boolean inDriverEntryGrace) {
+        if (projectionFastStartedThisBoot) return;
+        if (sessionActive || manualActive || !store.isProjectionApRequested()) {
+            platform.cancelScheduled(TAG_PROJ_FASTSTART);
+            return;
+        }
+        if (veh == null || (!veh.isPowerOn() && !inDriverEntryGrace)) {
+            platform.cancelScheduled(TAG_PROJ_FASTSTART);
+            return;
+        }
+        int apSt = platform.getSoftApState();
+        if ((apSt == WifiPlatform.AP_STATE_ENABLING || apSt == WifiPlatform.AP_STATE_ENABLED)
+                && platform.getSoftApMode() == 2) {
+            String reason = veh.isPowerOn() ? "power_on" : "driver_entry_grace";
+            if (platform.fastStartProjectionStack(reason)) {
+                projectionFastStartedThisBoot = true;
+                platform.cancelScheduled(TAG_PROJ_FASTSTART);
+                recordFlight("PROJ_FASTSTART", "reason=" + reason, "reason=" + reason, false);
+                return;
+            }
+        }
+        if (projFastStartPolls < PROJ_FASTSTART_MAX_POLLS) {
+            projFastStartPolls++;
+            platform.scheduleDelayed(TAG_PROJ_FASTSTART, PROJ_FASTSTART_POLL_MS, new Runnable() {
+                @Override
+                public void run() {
+                    synchronized (HomeWifiController.this) {
+                        if (projectionFastStartedThisBoot || sessionActive || manualActive) return;
+                        long nowEl = platform.elapsedRealtimeMs();
+                        boolean inGrace = driverEntryGraceStartMs >= 0L
+                                && !driverEntryGraceExited
+                                && !sawPowerOnThisBoot
+                                && "delay_mode".equalsIgnoreCase(lastVehicle.power)
+                                && (nowEl - driverEntryGraceStartMs) < ENTRY_GRACE_MS;
+                        maybeFastStartProjection(lastVehicle, inGrace);
+                    }
+                }
+            });
+        }
     }
 
     private boolean shouldPreLatchAdmPower(WifiPlatform.VehicleSnapshot veh,
@@ -577,7 +708,17 @@ public final class HomeWifiController implements WifiPlatform.Events {
     }
 
     private boolean evaluateOffLong(WifiPlatform.VehicleSnapshot veh, long nowElapsed) {
-        if (veh.isPowerOn()) {
+        boolean inGrace = driverEntryGraceStartMs >= 0L
+                && !driverEntryGraceExited
+                && !sawPowerOnThisBoot
+                && veh != null
+                && "delay_mode".equalsIgnoreCase(veh.power)
+                && (nowElapsed - driverEntryGraceStartMs) < ENTRY_GRACE_MS;
+        return evaluateOffLong(veh, nowElapsed, inGrace);
+    }
+
+    private boolean evaluateOffLong(WifiPlatform.VehicleSnapshot veh, long nowElapsed, boolean inDriverEntryGrace) {
+        if (veh.isPowerOn() || inDriverEntryGrace) {
             powerOffSinceMs = -1L;
             doorOpenedWhileOff = false;
             return false;
@@ -599,6 +740,11 @@ public final class HomeWifiController implements WifiPlatform.Events {
     }
 
     private void enterClientSession(String reason) {
+        platform.clearProjectionFastStart();
+        if (!lastVehicle.isPowerOn()) {
+            driverEntryGraceExited = true;
+            driverEntryGraceStartMs = -1L;
+        }
         sessionActive = true;
         isConnectingToTarget = false;
         isFastConnecting = false;
@@ -1672,6 +1818,7 @@ public final class HomeWifiController implements WifiPlatform.Events {
         platform.cancelScheduled(TAG_ASSOC_WATCHDOG);
         platform.cancelScheduled(TAG_ASSOC_SETTLE);
         platform.cancelScheduled(TAG_DHCP_POLL);
+        platform.cancelScheduled(TAG_PROJ_FASTSTART);
     }
 
     // ---- Command handling (@hmgapi-wifi & CLI) ----

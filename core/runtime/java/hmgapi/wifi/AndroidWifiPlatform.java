@@ -1,6 +1,7 @@
 package hmgapi.wifi;
 
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -52,6 +53,15 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     private static final File STANDALONE_BL_MARKER = new File("/dev/.hmgapi-wifi-bl");
     private static final File PROJECTION_RESUME_FILE = new File("/data/hmgapi/public/projection-resume.json");
     private static final File BT_STANDBY_RESTORE_MARKER = new File("/data/hmgapi/public/bt-standby-restore");
+    public static final File PROJ_FASTSTART_MARKER = new File("/dev/.hmgapi-proj-faststart");
+    private static final File OPENLINK_BT_MARKER = new File("/dev/.openlink-bt");
+    private static final File BOUNCE_BT_MARKER = new File("/dev/.hmgapi-bounce-bt");
+    private static final String[][] PROJECTION_SERVICES = new String[][] {
+            { "com.android.bluetooth", "com.broadcom.bt.service.btcmservice.HfDeviceBTCMService" },
+            { "com.daudio.app.phoneprojection", "com.daudio.app.phoneprojection.service.PhoneProjectionService" },
+            { "com.daudio.app.phoneprojection", "com.daudio.app.phoneprojection.wireless.service.WirelessPhoneProjectionService" },
+            { "com.google.android.projection.sink", "com.google.android.projection.service.GalReceiverService" }
+    };
 
     private final Context context;
     private final WifiManager wifiManager;
@@ -1578,6 +1588,186 @@ public final class AndroidWifiPlatform implements WifiPlatform {
     @Override
     public boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown) {
         return router.setAdbOverWifi(enable, wlanIp, deferTeardown);
+    }
+
+    @Override
+    public boolean fastStartProjectionStack(String reason) {
+        if (!"1".equals(getSystemProp("sys.boot_completed"))) {
+            return false;
+        }
+        String curBoot = bootId();
+        if (isPeerOpenLinkHoldingPower() || isBtStandbyMarkerActive(curBoot)) {
+            PROJ_FASTSTART_MARKER.delete();
+            return false;
+        }
+        writeFileQuietly(PROJ_FASTSTART_MARKER, curBoot + "\n");
+        PROJ_FASTSTART_MARKER.setReadable(true, false);
+
+        boolean btTriggered = enableBluetoothIfOff();
+        int startedSvcs = 0;
+        for (int i = 0; i < PROJECTION_SERVICES.length; i++) {
+            Intent svc = new Intent();
+            svc.setComponent(new ComponentName(PROJECTION_SERVICES[i][0], PROJECTION_SERVICES[i][1]));
+            if (startServiceDirect(svc)) {
+                startedSvcs++;
+            }
+        }
+        String detail = "reason=" + (reason == null ? "boot" : reason)
+                + " btEnable=" + btTriggered + " svcs=" + startedSvcs + "/" + PROJECTION_SERVICES.length;
+        recordPlatformFlight("PROJ_FASTSTART", detail, false);
+        log("Fast-started wireless projection stack (" + detail + ")");
+        return true;
+    }
+
+    @Override
+    public void clearProjectionFastStart() {
+        PROJ_FASTSTART_MARKER.delete();
+    }
+
+    private static boolean isBtStandbyMarkerActive(String curBoot) {
+        if (curBoot == null || curBoot.isEmpty()) return false;
+        return matchesBootFile(OPENLINK_BT_MARKER, curBoot) || matchesBootFile(BOUNCE_BT_MARKER, curBoot);
+    }
+
+    private static boolean matchesBootFile(File f, String curBoot) {
+        if (f == null || !f.isFile()) return false;
+        try {
+            return curBoot.equals(HomeWifiStore.readText(f).trim());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String getSystemProp(String key) {
+        try {
+            Object v = Class.forName("android.os.SystemProperties")
+                    .getMethod("get", String.class, String.class)
+                    .invoke(null, key, "");
+            return v instanceof String ? ((String) v).trim() : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static boolean enableBluetoothIfOff() {
+        try {
+            int st = -1;
+            try {
+                android.bluetooth.BluetoothAdapter ad = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+                if (ad != null) st = ad.getState();
+            } catch (Throwable ignored) {
+            }
+            if (st == 11 || st == 12 || st == 13) {
+                return false;
+            }
+            Object b = Class.forName("android.os.ServiceManager")
+                    .getMethod("getService", String.class)
+                    .invoke(null, "bluetooth_manager");
+            if (b == null) return false;
+            Object bt = Class.forName("android.bluetooth.IBluetoothManager$Stub")
+                    .getMethod("asInterface", IBinder.class)
+                    .invoke(null, b);
+            if (bt == null) return false;
+            if (st < 0) {
+                try {
+                    if (Boolean.TRUE.equals(bt.getClass().getMethod("isEnabled").invoke(bt))) {
+                        return false;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            try {
+                bt.getClass().getMethod("enable").invoke(bt);
+            } catch (NoSuchMethodException e) {
+                bt.getClass().getMethod("enable", String.class).invoke(bt, "android");
+            }
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean startServiceDirect(Intent intent) {
+        try {
+            Class<?> amn = Class.forName("android.app.ActivityManagerNative");
+            Object am = amn.getMethod("getDefault").invoke(null);
+            if (am != null) {
+                Method[] methods = am.getClass().getMethods();
+                for (int i = 0; i < methods.length; i++) {
+                    Method m = methods[i];
+                    if (!"startService".equals(m.getName())) continue;
+                    Class<?>[] p = m.getParameterTypes();
+                    if (p.length == 4) {
+                        m.invoke(am, null, intent, intent.getType(), Integer.valueOf(0));
+                        return true;
+                    } else if (p.length == 5) {
+                        m.invoke(am, null, intent, intent.getType(), "android", Integer.valueOf(0));
+                        return true;
+                    } else if (p.length == 3) {
+                        m.invoke(am, null, intent, intent.getType());
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (context != null) {
+            try {
+                context.startService(intent);
+                return true;
+            } catch (Throwable ignored) {
+            }
+        }
+        return false;
+    }
+
+    /** Standalone CLI entry point when Home Wi-Fi is off ("projection" asked, "home" off). */
+    public static void fastStartStandaloneIfPowerOn() {
+        try {
+            String boot = "";
+            try {
+                boot = HomeWifiStore.readText(new File("/proc/sys/kernel/random/boot_id")).trim();
+            } catch (Exception ignored) {
+            }
+            if (isBtStandbyMarkerActive(boot)) return;
+            String pwr = readDirectMicomPowerNameFallback();
+            boolean isOn = "on".equalsIgnoreCase(pwr) || pwr.isEmpty();
+            if (!isOn) {
+                try {
+                    Object bcm = getMicomBinder("com.hkmc.micom.bcm", "com.hkmc.bcm.IBCMService$Stub");
+                    if (bcm != null) {
+                        Object ign = bcm.getClass().getMethod("getIGNStatus").invoke(bcm);
+                        isOn = Boolean.TRUE.equals(ign) || (ign instanceof Number && ((Number) ign).intValue() == 1);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            if (!isOn) return;
+            if (!boot.isEmpty()) {
+                writeFileQuietly(PROJ_FASTSTART_MARKER, boot + "\n");
+                PROJ_FASTSTART_MARKER.setReadable(true, false);
+            }
+            enableBluetoothIfOff();
+            Class<?> amn = Class.forName("android.app.ActivityManagerNative");
+            Object am = amn.getMethod("getDefault").invoke(null);
+            if (am == null) return;
+            for (int i = 0; i < PROJECTION_SERVICES.length; i++) {
+                Intent svc = new Intent();
+                svc.setComponent(new ComponentName(PROJECTION_SERVICES[i][0], PROJECTION_SERVICES[i][1]));
+                for (Method m : am.getClass().getMethods()) {
+                    if (!"startService".equals(m.getName())) continue;
+                    Class<?>[] p = m.getParameterTypes();
+                    if (p.length == 4) {
+                        m.invoke(am, null, svc, null, Integer.valueOf(0));
+                        break;
+                    } else if (p.length == 5) {
+                        m.invoke(am, null, svc, null, "android", Integer.valueOf(0));
+                        break;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override

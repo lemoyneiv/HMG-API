@@ -193,7 +193,7 @@ final class HomeWifi {
         "ASKS=$S/wifi.txt",
         "W=$S/wifi",
         "case $1 in",
-        "    status|scan|saved|seen|join|connect|use|adb|keepawake|forget|now|back|down|log|log-usb|log-clear)",
+        "    status|scan|saved|seen|join|connect|use|adb|keepawake|forget|now|back|down|log|log-usb|log-clear|faststart)",
         "        CLASSPATH=$JAR exec app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli \"$@\"",
         "        ;;",
         "esac",
@@ -212,6 +212,10 @@ final class HomeWifi {
         "if [ -n \"$(wants home)\" ]; then",
         "    CLASSPATH=$JAR exec app_process /system/bin --nice-name=hmgapi.wifi hmgapi.wifi.HomeWifiDaemon",
         "fi",
+        "if [ -n \"$(wants projection)\" ]; then",
+        "    i=0; while [ $i -lt 30 ] && [ \"$(getprop sys.boot_completed 2>/dev/null)\" != 1 ]; do sleep 1; i=$((i + 1)); done",
+        "    CLASSPATH=$JAR app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli faststart >/dev/null 2>&1 || true",
+        "fi",
         "while :; do",
         "    t0=$(now); sleep 30; d=$(($(now) - t0))",
         "    if [ $d -gt 90 ] && [ -n \"$(wants projection)\" ]; then",
@@ -219,6 +223,7 @@ final class HomeWifi {
         "        if CLASSPATH=$JAR app_process /system/bin hmgapi.engine.WifiAp ensure-projection >/dev/null 2>&1; then",
         "            boot > $W/ap.boot",
         "        fi",
+        "        CLASSPATH=$JAR app_process /system/bin hmgapi.wifi.HomeWifiDaemon cli faststart >/dev/null 2>&1 || true",
         "    fi",
         "done");
 }

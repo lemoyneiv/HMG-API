@@ -55,6 +55,7 @@ public final class HomeWifiControllerTest {
         testSlowSoftApDisablingAndRapManualScanHandoff();
         testSilentDelayModeBackgroundWakeFastRelease();
         testDoorWakeSquashedProjectionSoftApRestoredOnIgOn();
+        testDriverEntryGraceProjectionPreStartAndBootSoftApSelfHeal();
         testRouterWithFakeToolsIfPresent();
 
         if (fails > 0) {
@@ -1250,6 +1251,99 @@ public final class HomeWifiControllerTest {
         }
     }
 
+    private static void testDriverEntryGraceProjectionPreStartAndBootSoftApSelfHeal() throws Exception {
+        File root = Files.createTempDirectory("hw-entry-grace").toFile();
+        try {
+            File stateDir = new File(root, "data/hmgapi/state");
+            stateDir.mkdirs();
+            Files.write(new File(stateDir, "wifi.txt").toPath(),
+                    "projection wireless-carplay-aa\nhome\n".getBytes("UTF-8"));
+            HomeWifiStore store = new HomeWifiStore(root);
+            store.upsertOwnerProfile("Garage5G", "garage-password", true, "[WPA2-PSK-CCMP][ESS]", true);
+
+            // 1. Locked-cabin silent delay_mode wake: must NEVER enter Driver Entry Grace or fast-start projection!
+            FakeWifiPlatform silentPlat = new FakeWifiPlatform();
+            silentPlat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, true, false, false, 85, false, 1, 1);
+            HomeWifiController silentCtl = new HomeWifiController(store, silentPlat);
+            silentCtl.start();
+            check("Silent locked delay_mode wake never calls fastStartProjectionStack",
+                    Integer.valueOf(0), Integer.valueOf(silentPlat.fastStartCalls));
+            checkTrue("Silent locked delay_mode wake never sets fast-start approval marker",
+                    !silentPlat.fastStartMarkerPresent);
+
+            // 2. Cold delay_mode boot with door open & unlocked in Park (doorsClosed=0, doorsLocked=0, gearPark=true):
+            //    Enters 45s Driver Entry Grace, self-heals squashed Mode 2 SoftAP, and fast-starts projection!
+            FakeWifiPlatform gracePlat = new FakeWifiPlatform();
+            gracePlat.softApActive = false; // squashed at boot
+            gracePlat.bootCompleted = false; // sys.boot_completed still 0 initially
+            gracePlat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, true, false, false, 85, false, 0, 0);
+            HomeWifiController graceCtl = new HomeWifiController(store, gracePlat);
+            graceCtl.start();
+
+            check("Driver Entry Grace keeps controller in standby even with doorsClosed=0 + gearPark=true",
+                    "standby", Json.object(graceCtl.statusJson()).get("phase"));
+            checkTrue("Driver Entry Grace does NOT pre-latch parked power", !gracePlat.holdParkedPower);
+            check("Squashed Mode 2 SoftAP self-healed during Driver Entry Grace",
+                    Integer.valueOf(2), Integer.valueOf(gracePlat.lastRestoredApMode));
+            check("Projection fast-start waits while sys.boot_completed=0",
+                    Integer.valueOf(0), Integer.valueOf(gracePlat.fastStartCalls));
+
+            // 400ms later sys.boot_completed flips to 1 -> TAG_PROJ_FASTSTART fires without waiting 4s!
+            gracePlat.bootCompleted = true;
+            gracePlat.nowMs += 400L;
+            gracePlat.fireTimer(HomeWifiController.TAG_PROJ_FASTSTART);
+            check("Projection fast-start fires on 400ms poll as soon as boot_completed=1",
+                    Integer.valueOf(1), Integer.valueOf(gracePlat.fastStartCalls));
+            check("Fast-start reason is driver_entry_grace",
+                    "driver_entry_grace", gracePlat.lastFastStartReason);
+            checkTrue("Fast-start approval marker active during Driver Entry Grace",
+                    gracePlat.fastStartMarkerPresent);
+
+            // Still in grace at +25s while driver sits unlocked (doorsClosed=1, doorsLocked=0)
+            gracePlat.nowMs += 25000L;
+            gracePlat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, true, false, false, 85, false, 1, 0);
+            graceCtl.tickVehicleAndHealth();
+            check("Still in standby at +25s while driver is seated & unlocked",
+                    "standby", Json.object(graceCtl.statusJson()).get("phase"));
+            check("Projection fast-start remains strictly one-shot per boot",
+                    Integer.valueOf(1), Integer.valueOf(gracePlat.fastStartCalls));
+
+            // Driver exits, closes door, and locks car (doorsClosed=1, doorsLocked=1) -> immediate grace exit!
+            gracePlat.nowMs += 2000L;
+            gracePlat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, true, false, false, 85, false, 1, 1);
+            graceCtl.tickVehicleAndHealth();
+            checkTrue("Re-locking car immediately clears fast-start approval marker",
+                    !gracePlat.fastStartMarkerPresent);
+            checkTrue("Re-locking car immediately starts parked Home Wi-Fi session",
+                    !gracePlat.softApActive);
+
+            // 3. 45s timeout when car stays unlocked in delay_mode without IG ON
+            FakeWifiPlatform timeoutPlat = new FakeWifiPlatform();
+            timeoutPlat.vehicle = new WifiPlatform.VehicleSnapshot("delay_mode", false, true, false, false, 85, false, 1, 0);
+            HomeWifiController timeoutCtl = new HomeWifiController(store, timeoutPlat);
+            timeoutCtl.start();
+            checkTrue("Unlocked cold delay_mode starts in Driver Entry Grace", timeoutPlat.softApActive);
+            timeoutPlat.nowMs += 45500L;
+            timeoutCtl.tickVehicleAndHealth();
+            checkTrue("45s timeout clears fast-start marker and hands off to parked Home Wi-Fi",
+                    !timeoutPlat.fastStartMarkerPresent && !timeoutPlat.softApActive);
+
+            // 4. Normal power=on cold boot with squashed Mode 2 SoftAP (no false->true power transition!)
+            FakeWifiPlatform onPlat = new FakeWifiPlatform();
+            onPlat.softApActive = false;
+            onPlat.vehicle = new WifiPlatform.VehicleSnapshot("on", false, true, false, false, 90, false, 1, 0);
+            HomeWifiController onCtl = new HomeWifiController(store, onPlat);
+            onCtl.start();
+            check("Cold power=on boot self-heals squashed Mode 2 SoftAP immediately",
+                    Integer.valueOf(2), Integer.valueOf(onPlat.lastRestoredApMode));
+            check("Cold power=on boot triggers fastStartProjectionStack",
+                    Integer.valueOf(1), Integer.valueOf(onPlat.fastStartCalls));
+            check("Cold power=on fast-start reason is power_on", "power_on", onPlat.lastFastStartReason);
+        } finally {
+            deleteRec(root);
+        }
+    }
+
     private static int ipToInt(int a, int b, int c, int d) {
         return (a & 0xFF) | ((b & 0xFF) << 8) | ((c & 0xFF) << 16) | ((d & 0xFF) << 24);
     }
@@ -1303,6 +1397,10 @@ public final class HomeWifiControllerTest {
         boolean adbEnabled = false;
         String adbIp = "";
         boolean lastAdbDeferTeardown = false;
+        boolean bootCompleted = true;
+        int fastStartCalls = 0;
+        String lastFastStartReason = null;
+        boolean fastStartMarkerPresent = false;
 
         final List<NetEntry> configured = new ArrayList<NetEntry>();
         final Set<Integer> disabledInRamIds = new LinkedHashSet<Integer>();
@@ -1461,6 +1559,18 @@ public final class HomeWifiControllerTest {
             this.adbEnabled = false;
             this.adbIp = "";
             return false;
+        }
+        @Override
+        public boolean fastStartProjectionStack(String reason) {
+            if (!bootCompleted) return false;
+            fastStartCalls++;
+            lastFastStartReason = reason;
+            fastStartMarkerPresent = true;
+            return true;
+        }
+        @Override
+        public void clearProjectionFastStart() {
+            fastStartMarkerPresent = false;
         }
         @Override public void scheduleDelayed(String tag, long delayMs, Runnable task) { timers.put(tag, task); }
         @Override public void cancelScheduled(String tag) { timers.remove(tag); }

@@ -92,6 +92,7 @@ final class Live {
             }
         }
         BleHooks.sync(mods);
+        BtcmFastConnect.sync(mods);
         if (app != null && app.context != null) {
             for (String id : mods.keySet()) Mods.lateLoad(id, app, state, new HashSet<String>());
         }

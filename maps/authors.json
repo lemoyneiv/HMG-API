@@ -31,6 +31,18 @@
         "https://github.com/lemoyneiv/brake-indicator-gen5w",
         "https://github.com/lemoyneiv/light-vibes"
       ]
+    },
+    "5aa22839-7070-8177-9660-14941b7463c5": {
+      "name": "lemoyneiv",
+      "projects": "Gen5W Suite, EQ Engine (eq-engine), OpenLink, Brake Light Indicator, Bounce, Comfort & Startup, Home Screen Tile Manager, Light Vibes, HMG-API BLE",
+      "repos": [
+        "https://github.com/lemoyneiv/HMG-API",
+        "https://github.com/lemoyneiv/gen5w-suite",
+        "https://github.com/lemoyneiv/hmgapi-openlink",
+        "https://github.com/lemoyneiv/brake-indicator-gen5w",
+        "https://github.com/lemoyneiv/hmgapi-bounce",
+        "https://github.com/alexkozler/Gen5W-EQ-Engine"
+      ]
     }
   }
 }

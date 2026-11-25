@@ -168,6 +168,7 @@ final class HmgApi {
                 if (Points.need("CarPlay projection", "dipo")) ProjectionHooks.dipo(app);
             } else if (BleHooks.PACKAGE.equals(app.packageName)) {
                 BleHooks.init(app);
+                BtcmFastConnect.init(app);
             }
             else if (Mods.APP_PACKAGE.equals(app.packageName)) {
                 Hooks.findClass("hmgapi.app.HmgApiStatus", app.classLoader).getField("json")

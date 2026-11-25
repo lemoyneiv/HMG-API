@@ -96,4 +96,24 @@ javac --release 8 -Xlint:-options -nowarn -cp "$CP:$T/sms" -d "$T/bt-cls" \
     core/runtime/java/hmgapi/hook/BtStandby.java \
     core/runtime/test/hmgapi/hook/BtStandbyTest.java
 java -cp "$CP:$T/sms:$T/bt-cls" hmgapi.hook.BtStandbyTest || fail=1
+
+if [ -n "$ANDROID_HOME" ] && [ -f "$ANDROID_HOME/platforms/android-19/android.jar" ]; then
+    AJ="$ANDROID_HOME/platforms/android-19/android.jar"
+elif [ -f /opt/android-sdk/platforms/android-19/android.jar ]; then
+    AJ=/opt/android-sdk/platforms/android-19/android.jar
+else
+    AJ=""
+fi
+if [ -n "$AJ" ]; then
+    mkdir -p "$T/btcm-cls"
+    printf 'package hmgapi.hook;\npublic class LoadedApp { public android.content.Context context; public ClassLoader classLoader; }\n' > "$T/bt/hmgapi/hook/LoadedApp.java"
+    javac --release 8 -Xlint:-options -nowarn -cp "$AJ:$CP:$T/sms" -d "$T/btcm-cls" \
+        "$T/bt/hmgapi/hook/Hooks.java" \
+        "$T/bt/hmgapi/hook/HmgApi.java" \
+        "$T/bt/hmgapi/hook/LoadedApp.java" \
+        core/runtime/java/hmgapi/hook/BtStandby.java \
+        core/runtime/java/hmgapi/hook/BtcmFastConnect.java \
+        core/runtime/test/hmgapi/hook/BtcmFastConnectTest.java
+    java -cp "$AJ:$CP:$T/sms:$T/btcm-cls" hmgapi.hook.BtcmFastConnectTest || fail=1
+fi
 exit $fail

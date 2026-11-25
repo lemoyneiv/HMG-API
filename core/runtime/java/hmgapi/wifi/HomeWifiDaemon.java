@@ -342,6 +342,10 @@ public final class HomeWifiDaemon {
                 return 1;
             }
         }
+        if ("faststart".equals(verb)) {
+            AndroidWifiPlatform.fastStartStandaloneIfPowerOn();
+            return 0;
+        }
         if ("status".equals(verb)) {
             HomeWifiController offline = new HomeWifiController(store, new InertPlatform(store));
             System.out.println(offline.statusJson());
@@ -415,6 +419,8 @@ public final class HomeWifiDaemon {
         @Override public boolean routeUp(String ip, String gateway, String dns1, String dns2) { return false; }
         @Override public void routeDown() {}
         @Override public boolean setAdbOverWifi(boolean enable, String wlanIp, boolean deferTeardown) { return false; }
+        @Override public boolean fastStartProjectionStack(String reason) { return false; }
+        @Override public void clearProjectionFastStart() {}
         @Override public void scheduleDelayed(String tag, long delayMs, Runnable task) {}
         @Override public void cancelScheduled(String tag) {}
         @Override public void log(String line) {}

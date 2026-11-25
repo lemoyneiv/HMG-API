@@ -30,7 +30,7 @@ jobs:
 
       - name: Check the catalogue
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           case "$BASE" in
             ""|0000000000000000000000000000000000000000) python3 tools/catalog.py check --download ;;
