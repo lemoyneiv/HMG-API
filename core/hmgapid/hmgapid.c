@@ -1416,18 +1416,9 @@ static void svc_tick(void)
     static long last;
     static char apps[8192];
     long now = x_time();
-    int i;
+    int i, newly_up = 0;
     if (now == last) return;
     last = now;
-    if (!android_up && now - last_android_check >= 1) {
-        char v[16];
-        char *a[] = { GETPROP, "sys.boot_completed", 0 };
-        last_android_check = now;
-        if (capture(a, v, sizeof v) > 0 && v[0] == '1') {
-            android_up = 1;
-            logline("Android is up", 0, -1, 0);
-        }
-    }
     svc_reload(now);
     svc_ctl(now);
     {   /* a mod's cellular/home-Wi-Fi group changed (allow_cellular or home_wifi): restart running services into it */
@@ -1450,15 +1441,8 @@ static void svc_tick(void)
             }
         }
     }
-    /* the mods' apps, when the list changes (or first after Android is up) */
-    if (android_up) {
-        if (read_small(ROOTDIR "/state/apps.txt", apps, sizeof apps) < 0) apps[0] = 0;
-        if (apps_sync_pending || !seq(apps, apps_synced)) {
-            if (apps[0] || exists(ROOTDIR "/state/apps.json")) apps_sync();
-            mcpy(apps_synced, apps, slen(apps) + 1);
-            apps_sync_pending = 0;
-        }
-    }
+    /* Start "boot" services BEFORE forking getprop sys.boot_completed: zygote spawns hmgapid
+     * at the exact moment init starts mediaserver (~3.63 s), leaving ~170 ms for boot overlays. */
     for (i = 0; i < nsvc; i++) {
         struct svc *v = &svcs[i];
         if (v->pid > 0 && v->kill_at && now >= v->kill_at) { x_kill(-v->pid, SIGKILL); x_kill(v->pid, SIGKILL); v->kill_at = 0; }
@@ -1471,6 +1455,31 @@ static void svc_tick(void)
             continue;
         }
         if (v->state == S_WAIT && v->pid == 0 && v->next && now >= v->next && (seq(v->f[3], "boot") || android_up)) svc_start(v, now);
+    }
+    if (!android_up && now - last_android_check >= 1) {
+        char v[16];
+        char *a[] = { GETPROP, "sys.boot_completed", 0 };
+        last_android_check = now;
+        if (capture(a, v, sizeof v) > 0 && v[0] == '1') {
+            android_up = 1;
+            newly_up = 1;
+            logline("Android is up", 0, -1, 0);
+        }
+    }
+    /* the mods' apps, when the list changes (or first after Android is up) */
+    if (android_up) {
+        if (read_small(ROOTDIR "/state/apps.txt", apps, sizeof apps) < 0) apps[0] = 0;
+        if (apps_sync_pending || !seq(apps, apps_synced)) {
+            if (apps[0] || exists(ROOTDIR "/state/apps.json")) apps_sync();
+            mcpy(apps_synced, apps, slen(apps) + 1);
+            apps_sync_pending = 0;
+        }
+    }
+    if (newly_up) {
+        for (i = 0; i < nsvc; i++) {
+            struct svc *v = &svcs[i];
+            if (v->state == S_WAIT && v->pid == 0 && v->next && now >= v->next && !seq(v->f[3], "boot")) svc_start(v, now);
+        }
     }
     if (status_dirty) write_status();
 }

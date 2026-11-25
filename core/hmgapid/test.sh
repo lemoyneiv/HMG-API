@@ -17,6 +17,7 @@ ME=$(id -u)
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1: wanted [$2], got [$3]"; fail=1; fi; }
 has() { case "$3" in *"$2"*) echo "ok    $1" ;; *) echo "FAIL  $1: wanted [$2] in [$3]"; fail=1 ;; esac; }
+waitfor() { i=0; while [ $i -lt 40 ]; do if eval "$1"; then return 0; fi; sleep 0.25; i=$((i+1)); done; return 1; }
 
 # build <name> <shell uid> <packages.list line or empty>
 build() {
@@ -38,14 +39,20 @@ build app 99999 "hmgapi.app $ME 0 /data/data/hmgapi.app default 3003"
 build other 99999 "hmgapi.app 12345 0 /data/data/hmgapi.app default 3003"
 build mod 99999 "hmgapi.app 12345 0 /data/data/hmgapi.app default 3003
 com.example.demo $ME 0 /data/data/com.example.demo default 3003,1015"
-mkdir -p "$T/mod/root/state" "$T/mod/root/mods/demo"
+mkdir -p "$T/mod/root/state" "$T/mod/root/mods/demo/bin"
 printf 'com.example.demo demo\n' > "$T/mod/root/state/apps.txt"
+printf 'echo early\n' > "$T/mod/root/mods/demo/bin/early.sh"
+printf 'demo early root boot no script bin/early.sh -\n' > "$T/mod/root/state/services.txt"
+printf '#!/bin/sh\nif [ ! -f "%s/getprop.first" ]; then\n  : > "%s/getprop.first"\n  if [ -d "%s/root/run/demo/early" ]; then echo yes > "%s/boot_before_getprop"; else echo no > "%s/boot_before_getprop"; fi\nfi\n'"$CAT"' "%s/bootprop" 2>/dev/null\n' "$T/mod" "$T/mod" "$T/mod" "$T/mod" "$T/mod" "$T/mod" > "$T/mod/getprop"
+chmod +x "$T/mod/getprop"
 
 check "client without daemon" "hmgapid: not running" "$(run root ping)"
 for b in root app other mod; do
     out=$(KEEPME=yes LD_PRELOAD= "$T/$b/hmgapid" daemon)
     check "$b daemon starts" "hmgapid: started" "$out"
 done
+waitfor '[ -f "$T/mod/boot_before_getprop" ]' || true
+check "boot service started before first getprop sys.boot_completed" "yes" "$(cat "$T/mod/boot_before_getprop" 2>/dev/null)"
 check "second daemon refuses" "hmgapid: already running" "$("$T/root/hmgapid" daemon)"
 
 # --- root/shell caller
